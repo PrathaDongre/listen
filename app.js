@@ -677,7 +677,8 @@ document.addEventListener('keydown', e => {
 /* ================================================================ start */
 setRate(rate());
 (async () => {
-  const local = ['localhost', '127.0.0.1'].includes(location.hostname) &&
+  const forceDrive = new URLSearchParams(location.search).has('drive');   // test the Google Drive version locally
+  const local = !forceDrive && ['localhost', '127.0.0.1'].includes(location.hostname) &&
     await fetch('library.json', { method: 'HEAD' }).then(r => r.ok).catch(() => false);
   if (!local) {
     Source = DriveSource;
