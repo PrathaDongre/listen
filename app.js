@@ -97,7 +97,7 @@ const DriveSource = {
         c.file = f.name; c.timed = !!by[f.name.replace(/\.mp3$/, '.json')];
         return c;
       });
-      if (!chapters.length && !by['book.epub']) return null;
+      if (!by['book.json']) return null;              // not a book folder (e.g. voice samples)
       return { id: s.name, title: meta.title || s.name, author: meta.author || '', voice: meta.voice || '', speed: meta.speed,
                total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by };
     }));
