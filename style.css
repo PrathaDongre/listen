@@ -279,3 +279,5 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .pb-bar .seg[style*="width:0%"] { display: none; }
 .chart-tip { position: absolute; z-index: 60; background: #2a2723; color: #f5f1e8; font-size: 12.5px; padding: 6px 10px; border-radius: 8px; pointer-events: none; white-space: nowrap; }
 .sync-note { padding: 0; }
+.icon.home { font-size: 22px; }
+#player .top-titles { margin-right: 40px; }   /* keep titles centred with two buttons on the left */

@@ -268,8 +268,25 @@ async function showPlayer(b, n) {
   pendingStart = p && p.n === ch.n ? p.t : 0;
   renderText(null, true);
   showStat();
-  const [url, data] = await Promise.all([Source.audioUrl(b, ch), Source.timing(b, ch)]);
+  let url, data;
+  try {
+    [url, data] = await Promise.all([
+      Source.audioUrl(b, ch),
+      Source.timing(b, ch).catch(e => { console.warn('timing', e); return null; }),   // no text is better than no audio
+    ]);
+  } catch (e) {
+    console.error('chapter', e);
+    if (seq !== loadSeq) return;
+    $('noText').hidden = false;
+    $('noText').querySelector('strong').textContent = 'Couldn’t load this chapter';
+    $('noText').querySelector('.muted').textContent = /sign|401|token/i.test(e.message)
+      ? 'Your Google sign-in may have expired. Go back to the library and sign in again.'
+      : 'Check your internet connection, then tap the chapter again.';
+    return;
+  }
   if (seq !== loadSeq) return;
+  $('noText').querySelector('strong').textContent = 'Audio only';
+  $('noText').querySelector('.muted').textContent = 'This chapter was recorded before word timings were added, so there’s no synced text. Re-recording it adds the text.';
   audio.src = url;
   audio.playbackRate = rate(); audio.defaultPlaybackRate = rate();
   audio.preservesPitch = true;
@@ -277,7 +294,7 @@ async function showPlayer(b, n) {
   mediaSession();
   renderText(data);
   if (wasPlaying) audio.play().catch(() => {});
-  sync(true);
+  tick(true);
 }
 $('toBook').onclick = () => location.hash = `#/book/${enc(book.id)}`;
 $('toReader').onclick = () => { Hooks.jumpFromPlayer(); location.hash = `#/read/${enc(book.id)}`; };
@@ -359,16 +376,42 @@ function sync(jump) {
   $('seek').max = d; if (!seeking) $('seek').value = audio.currentTime;
   $('tNow').textContent = fmt(audio.currentTime);
   $('tLeft').textContent = '-' + fmt((d - audio.currentTime) / rate());
-  if (Date.now() - lastStat > 1000) showStat();
+  if (Date.now() - lastStat > 1000) try { showStat(); } catch (e) { console.error('stat', e); }
 }
-function loop() { sync(false); raf = audio.paused ? 0 : requestAnimationFrame(loop); }
+/* The screen follows the audio through two independent clocks: the browser's drawing timer
+ * (smooth, but paused whenever the page is hidden or covered) and a plain 250 ms timer plus the
+ * audio's own progress events as a backstop. Every play restarts both from scratch, and an error
+ * in one update can never stop the next one. */
+let ticker = 0;
+function tick(jump) {
+  try { sync(jump); } catch (e) { console.error('player update', e); }
+  const playing = !audio.paused;                       // keep the button truthful, whatever happened
+  if ($('play').dataset.playing !== String(playing)) {
+    $('play').dataset.playing = playing;
+    $('play').textContent = playing ? '❚❚' : '▶';
+    $('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  }
+}
+function loop() {
+  raf = 0;
+  tick(false);
+  if (!audio.paused) raf = requestAnimationFrame(loop);
+}
+function startLoop() {
+  cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
+  clearInterval(ticker);
+  ticker = setInterval(() => { if (audio.paused) { clearInterval(ticker); ticker = 0; } tick(false); }, 250);
+}
 
-audio.onplay = () => { $('play').textContent = '❚❚'; $('play').setAttribute('aria-label', 'Pause'); if (!raf) loop(); };
-audio.onpause = () => { $('play').textContent = '▶'; $('play').setAttribute('aria-label', 'Play'); savePos(); };
-audio.onseeked = () => sync(true);
-audio.onloadedmetadata = () => { if (pendingStart) { audio.currentTime = pendingStart; pendingStart = 0; } sync(true); };
+audio.onplay = () => { tick(false); startLoop(); };
+audio.onplaying = startLoop;
+audio.onpause = () => { tick(false); savePos(); };
+audio.onseeked = () => tick(true);
+audio.onratechange = () => tick(false);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(true); if (!audio.paused) startLoop(); } });
+audio.onloadedmetadata = () => { if (pendingStart) { audio.currentTime = pendingStart; pendingStart = 0; } tick(true); };
 let lastSave = 0;
-audio.ontimeupdate = () => { if (Date.now() - lastSave > 5000) savePos(); };
+audio.ontimeupdate = () => { if (!raf || document.hidden) tick(false); if (Date.now() - lastSave > 5000) savePos(); };
 function savePos() { if (book && audio.src) { lastSave = Date.now(); Store.setPos(book.id, chapter.n, audio.currentTime); } }
 audio.onended = () => { const nx = sibling(1); if (nx) { autoNext = true; openChapter(nx); } };
 function sibling(d) { return book.chapters[book.chapters.indexOf(chapter) + d]; }
@@ -407,7 +450,7 @@ const rsvpOn = () => $('rsvpToggle').checked && words.length > 0;
 function applyMode() {
   $('rsvpView').hidden = !rsvpOn();
   $('textView').hidden = rsvpOn() || !words.length;
-  cur = -1; if (words.length) sync(true);
+  cur = -1; if (words.length) tick(true);
 }
 $('rsvpToggle').checked = !!Store.data.rsvp;
 $('rsvpToggle').onchange = () => { Store.data.rsvp = $('rsvpToggle').checked; Store.save(); applyMode(); };
