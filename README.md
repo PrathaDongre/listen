@@ -1,4 +1,4 @@
-# Listen
+# Soundshelf
 
 A small web app for listening to audiobooks with synced text, a one-word-at-a-time
 speed reader, and an EPUB reader.

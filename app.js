@@ -1,4 +1,4 @@
-/* Listen — audiobooks with synced text, a speed reader, and an EPUB reader.
+/* Soundshelf — audiobooks with synced text, a speed reader, and an EPUB reader.
  *
  * Books come from one of two places (the rest of the app doesn't care which):
  *  - LocalSource: the little server on your Mac (serve.py), used while developing.
@@ -8,13 +8,17 @@
 const $ = id => document.getElementById(id);
 const audio = $('audio');
 const CFG = window.LISTEN_CONFIG || {};
+/* Extra features (sync, stats, bookmarks, look-up) live in features.js and plug in through these. */
+const Hooks = window.Hooks = { saved() {}, signedIn() {}, readerReady() {}, relocated() {}, selected() {}, jumpFromPlayer() {}, showStats() {} };
 
 /* ================================================================ saved settings & positions */
 const Store = {
   data: (() => { try { return JSON.parse(localStorage.getItem('listen') || '{}'); } catch { return {}; } })(),
-  save() { try { localStorage.setItem('listen', JSON.stringify(this.data)); } catch {} },
+  save() { try { localStorage.setItem('listen', JSON.stringify(this.data)); } catch {} Hooks.saved(); },
   pos(id) { return (this.data.pos || {})[id]; },
-  setPos(id, n, t) { (this.data.pos ||= {})[id] = { n, t: Math.round(t) }; this.data.last = id; this.save(); },
+  setPos(id, n, t) { (this.data.pos ||= {})[id] = { n, t: Math.round(t), at: Date.now() }; this.setLast(id); },
+  setLast(id) { this.data.last = id; this.data.lastAt = Date.now(); this.save(); },
+  cfi(id) { const c = (this.data.cfi || {})[id]; return typeof c === 'string' ? c : c?.cfi; },
 };
 
 /* ================================================================ where books come from */
@@ -41,7 +45,7 @@ const DriveSource = {
       if (!window.google?.accounts?.oauth2) return reject(new Error('Google sign-in did not load. Check your connection.'));
       this.client ||= google.accounts.oauth2.initTokenClient({
         client_id: CFG.GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.readonly',
+        scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata',
         callback: () => {},
       });
       this.client.callback = r => {
@@ -164,12 +168,13 @@ async function route() {
   if (Source === DriveSource && !DriveSource.token) return show('signin');
   const [, view, id, n] = location.hash.split('/').map(decodeURIComponent);
   try {
-    if (!books.length || !view || view === 'book') await loadBooks();
+    if (!books.length || !view || view === 'book' || view === 'stats') await loadBooks();
   } catch (e) { console.error(e); }
   if (view !== 'read') closeReader();
   if (view === 'book') return showBook(findBook(id));
   if (view === 'play') return showPlayer(findBook(id), +n);
   if (view === 'read') return openReader(findBook(id));
+  if (view === 'stats') return Hooks.showStats();
   showLibrary();
 }
 addEventListener('hashchange', route);
@@ -255,7 +260,7 @@ async function showPlayer(b, n) {
   autoNext = false;
   audio.pause();
   book = b; chapter = ch;
-  Store.data.last = b.id; Store.save();
+  Store.setLast(b.id);
   $('pBook').textContent = b.title;
   $('pChapter').textContent = cleanTitle(ch.title);
   $('toReader').hidden = !b.epub;
@@ -275,7 +280,7 @@ async function showPlayer(b, n) {
   sync(true);
 }
 $('toBook').onclick = () => location.hash = `#/book/${enc(book.id)}`;
-$('toReader').onclick = () => location.hash = `#/read/${enc(book.id)}`;
+$('toReader').onclick = () => { Hooks.jumpFromPlayer(); location.hash = `#/read/${enc(book.id)}`; };
 
 function renderText(data, loading) {
   const view = $('textView');
@@ -379,7 +384,7 @@ $('seek').oninput = () => { seeking = true; $('tNow').textContent = fmt(+$('seek
 $('seek').onchange = () => { seeking = false; audio.currentTime = +$('seek').value; };
 $('textView').onclick = e => {
   const w = e.target.closest('.w');
-  if (!w) return;
+  if (!w || String(getSelection()).trim()) return;      // selecting text, not tapping a word
   audio.currentTime = words[+w.dataset.i].s;
   if (audio.paused) audio.play().catch(() => {});
 };
@@ -459,7 +464,7 @@ function mediaSession() {
 
 /* ================================================================ EPUB reader */
 const R = { book: null, epub: null, rendition: null, id: null, locReady: false, toc: [], ready: false };
-const RDEF = { theme: 'light', font: '', size: 100, leading: 1.5, margin: 24, align: '', flow: 'paginated', rotate: '0' };
+const RDEF = { theme: 'light', font: '', size: 100, leading: 1.5, margin: 24, align: '', flow: 'paginated', rotate: '0', columns: 'auto' };
 const rset = () => ({ ...RDEF, ...(Store.data.reader || {}) });
 const FONT_LINK = 'https://fonts.googleapis.com/css2?family=Literata:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Lexend:wght@400;600&display=swap';
 const THEMES = { light: ['#fbfaf7', '#1d1b18'], sepia: ['#f4ecd8', '#5b4636'], gray: ['#5a5a5c', '#ececec'], dark: ['#1e1e20', '#d9d6cf'], black: ['#000000', '#c8c8c8'] };
@@ -502,15 +507,17 @@ async function openReader(b) {
     if (R.id !== b.id) return;
     R.epub = ePub(data);
     const s = rset();
-    R.rendition = R.epub.renderTo('rStage', { width: '100%', height: '100%', flow: s.flow, spread: 'none', allowScriptedContent: false });
+    R.rendition = R.epub.renderTo('rStage', { width: '100%', height: '100%', flow: s.flow, allowScriptedContent: false,
+      spread: s.columns === 'one' || s.flow !== 'paginated' ? 'none' : 'auto', minSpreadWidth: 800 });
     R.rendition.hooks.content.register(styleContents);
     R.rendition.on('relocated', onRelocated);
     R.rendition.on('click', () => { if (rset().flow !== 'paginated') toggleImmersive(); });
     R.rendition.on('keyup', readerKeys);
-    const saved = (Store.data.cfi || {})[b.id];
-    await R.rendition.display(saved || undefined);
+    R.rendition.on('selected', (cfi, contents) => Hooks.selected(cfi, contents));
+    await R.rendition.display(Store.cfi(b.id) || undefined);
     R.ready = true;
-    Store.data.last = b.id; Store.save();
+    Store.setLast(b.id);
+    Hooks.readerReady();
     $('rLoading').hidden = true;
     const nav = await R.epub.loaded.navigation;
     R.toc = nav.toc;
@@ -557,7 +564,8 @@ function tocLabel(href) {
 }
 function onRelocated(loc) {
   if (!loc?.start || !R.rendition) return;
-  (Store.data.cfi ||= {})[R.id] = loc.start.cfi; Store.save();
+  (Store.data.cfi ||= {})[R.id] = { cfi: loc.start.cfi, at: Date.now() }; Store.save();
+  Hooks.relocated(loc);
   $('rChapter').textContent = tocLabel(loc.start.href);
   if (R.locReady) {
     const p = R.epub.locations.percentageFromCfi(loc.start.cfi) || 0;
@@ -632,6 +640,7 @@ function setReader(k, v) {
   if (!R.rendition || !R.ready) return;
   const loc = R.rendition.currentLocation();
   if (k === 'flow') R.rendition.flow(v);
+  if (k === 'flow' || k === 'columns') R.rendition.spread(rset().columns === 'one' || rset().flow !== 'paginated' ? 'none' : 'auto', 800);
   R.rendition.getContents().forEach(styleContents);
   requestAnimationFrame(() => {                       // re-flow the pages, staying on the same spot
     R.rendition.resize();
@@ -693,6 +702,7 @@ setRate(rate());
         $('signinMsg').textContent = 'Loading your library…';
         await loadBooks();
         $('signinMsg').textContent = '';
+        Hooks.signedIn();
         route();
       } catch (e) { $('signinMsg').textContent = e.message; }
     };

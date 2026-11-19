@@ -1,6 +1,6 @@
 {
-  "name": "Listen",
-  "short_name": "Listen",
+  "name": "Soundshelf",
+  "short_name": "Soundshelf",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#151417",

@@ -8,11 +8,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Listen">
+<meta name="apple-mobile-web-app-title" content="Soundshelf">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
-<title>Listen</title>
+<title>Soundshelf</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -21,7 +21,7 @@
 <section id="signin" class="view" hidden>
   <div class="signin">
     <img src="icon.svg" alt="" width="72" height="72">
-    <h1>Listen</h1>
+    <h1>Soundshelf</h1>
     <p class="muted">Your audiobooks and EPUBs, from the <b>Audiobooks</b> folder in your Google Drive.</p>
     <button id="signinBtn" class="primary">Sign in with Google</button>
     <p id="signinMsg" class="muted small"></p>
@@ -32,6 +32,7 @@
 <section id="library" class="view" hidden>
   <header class="top lib-top">
     <h1>Library</h1>
+    <button class="icon" data-go="#/stats" aria-label="Reading stats" title="Stats">📊</button>
     <button class="icon" id="refreshBtn" aria-label="Refresh library" title="Refresh">⟳</button>
   </header>
   <div id="hero" class="hero" hidden></div>
@@ -122,13 +123,24 @@
   </footer>
 </section>
 
+<!-- Reading stats -->
+<section id="stats" class="view" hidden>
+  <header class="top">
+    <button class="icon" data-go="#/" aria-label="Back to library">‹</button>
+    <div class="top-titles"><span class="chapter-name">Reading stats</span></div>
+    <span style="width:40px"></span>
+  </header>
+  <div id="statsBody" class="stats-body"></div>
+</section>
+
 <!-- EPUB reader -->
 <section id="reader" class="view reader" hidden>
   <div id="rotor" class="rotor">
     <header class="r-bar r-top" id="rTop">
       <button class="icon" id="rBack" aria-label="Back">‹</button>
       <div class="top-titles"><span id="rTitle" class="kicker"></span><span id="rChapter" class="chapter-name"></span></div>
-      <button class="icon" id="rTocBtn" aria-label="Contents">☰</button>
+      <button class="icon" id="rMarkBtn" aria-label="Bookmark this page" title="Bookmark this page">🔖</button>
+      <button class="icon" id="rTocBtn" aria-label="Contents, bookmarks and highlights">☰</button>
       <button class="icon" id="rSetBtn" aria-label="Display settings">Aa</button>
     </header>
     <div id="rFrame" class="r-frame">
@@ -143,8 +155,12 @@
 
     <!-- Contents -->
     <div id="rToc" class="sheet" hidden>
-      <div class="sheet-head"><b>Contents</b><button class="icon" data-close="rToc">✕</button></div>
+      <div class="sheet-head">
+        <div class="tabs" id="rTabs"><button data-tab="toc" class="on">Contents</button><button data-tab="bookmarks">Bookmarks</button><button data-tab="highlights">Highlights</button></div>
+        <button class="icon" data-close="rToc">✕</button>
+      </div>
       <ol id="rTocList" class="toc"></ol>
+      <ol id="rMarkList" class="toc marks" hidden></ol>
     </div>
 
     <!-- Display settings -->
@@ -184,6 +200,9 @@
       <div class="set-row"><span>Layout</span>
         <div class="seg" data-set="flow"><button data-v="paginated">Pages</button><button data-v="scrolled-doc">Scroll</button></div>
       </div>
+      <div class="set-row"><span>Columns <small class="muted">(when wide)</small></span>
+        <div class="seg" data-set="columns"><button data-v="auto">Two</button><button data-v="one">One</button></div>
+      </div>
       <div class="set-row"><span>Rotation</span>
         <div class="seg" data-set="rotate"><button data-v="0">0°</button><button data-v="90">90°</button><button data-v="180">180°</button><button data-v="270">270°</button></div>
       </div>
@@ -197,5 +216,6 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
 <script src="app.js"></script>
+<script src="features.js"></script>
 </body>
 </html>
