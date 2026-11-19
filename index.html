@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f3ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151417" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Listen">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>Listen</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Sign in (only when the books come from Google Drive) -->
+<section id="signin" class="view" hidden>
+  <div class="signin">
+    <img src="icon.svg" alt="" width="72" height="72">
+    <h1>Listen</h1>
+    <p class="muted">Your audiobooks and EPUBs, from the <b>Audiobooks</b> folder in your Google Drive.</p>
+    <button id="signinBtn" class="primary">Sign in with Google</button>
+    <p id="signinMsg" class="muted small"></p>
+  </div>
+</section>
+
+<!-- Library -->
+<section id="library" class="view" hidden>
+  <header class="top lib-top">
+    <h1>Library</h1>
+    <button class="icon" id="refreshBtn" aria-label="Refresh library" title="Refresh">⟳</button>
+  </header>
+  <div id="hero" class="hero" hidden></div>
+  <h2 class="section-title" id="allTitle">All books</h2>
+  <div id="shelf" class="shelf"></div>
+  <p id="empty" class="muted pad" hidden>No books yet. Books in your Audiobooks folder appear here.</p>
+</section>
+
+<!-- One book -->
+<section id="book" class="view" hidden>
+  <div class="book-hero">
+    <div class="backdrop" id="bookBackdrop"></div>
+    <header class="top">
+      <button class="icon" data-go="#/" aria-label="Back to library">‹</button>
+      <div class="top-titles"></div>
+    </header>
+    <div class="book-head pad">
+      <div id="bookCover" class="cover big"></div>
+      <div class="book-info">
+        <h2 id="bookTitle"></h2>
+        <p id="bookAuthor" class="muted"></p>
+        <p id="bookMeta" class="muted small"></p>
+        <div class="book-actions">
+          <button id="listenBtn" class="primary">▶ Listen</button>
+          <button id="readBtn" class="secondary">📖 Read</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <h3 class="section-title" id="chaptersTitle">Chapters</h3>
+  <ol id="chapterList" class="chapters"></ol>
+  <p id="noAudio" class="muted pad" hidden>No audio recorded for this book yet — you can still read it.</p>
+</section>
+
+<!-- Player -->
+<section id="player" class="view" hidden>
+  <header class="top">
+    <button class="icon" id="toBook" aria-label="Back to book">‹</button>
+    <div class="top-titles">
+      <span id="pBook" class="kicker"></span>
+      <span id="pChapter" class="chapter-name"></span>
+    </div>
+    <button class="icon" id="toReader" aria-label="Read the book" title="Read the book">📖</button>
+  </header>
+
+  <div id="stage">
+    <div id="textView" class="text-view"></div>
+    <div id="rsvpView" class="rsvp" hidden>
+      <div class="rsvp-guide top-guide"></div>
+      <div id="rsvpWord" class="rsvp-word"><span class="l"></span><span class="p"></span><span class="r"></span></div>
+      <div class="rsvp-guide"></div>
+      <p id="rsvpContext" class="rsvp-context"></p>
+    </div>
+    <div id="noText" class="no-text" hidden>
+      <div id="noTextCover" class="cover mid"></div>
+      <p><strong>Audio only</strong></p>
+      <p class="muted small">This chapter was recorded before word timings were added, so there's no synced text.
+        Re-recording it adds the text.</p>
+    </div>
+  </div>
+
+  <footer class="controls">
+    <div class="seek">
+      <span id="tNow" class="time">0:00</span>
+      <input type="range" id="seek" min="0" max="1" step="0.1" value="0" aria-label="Position in chapter">
+      <span id="tLeft" class="time">-0:00</span>
+    </div>
+    <div class="transport">
+      <button class="icon" id="prevCh" aria-label="Previous chapter">⏮</button>
+      <button class="icon skip" id="back15" aria-label="Back 15 seconds">↺<small>15</small></button>
+      <button id="play" class="play" aria-label="Play">▶</button>
+      <button class="icon skip" id="fwd15" aria-label="Forward 15 seconds">↻<small>15</small></button>
+      <button class="icon" id="nextCh" aria-label="Next chapter">⏭</button>
+    </div>
+    <div class="options">
+      <div class="speed">
+        <button class="mini" id="slower" aria-label="Slower">−</button>
+        <button class="speed-val" id="speedVal" title="Tap to reset to 1.0×">1.0×</button>
+        <button class="mini" id="faster" aria-label="Faster">+</button>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="rsvpToggle">
+        <span class="track"><span class="knob"></span></span>
+        <span>Speed reader</span>
+      </label>
+    </div>
+    <button id="stat" class="stat" title="Tap for another stat"></button>
+  </footer>
+</section>
+
+<!-- EPUB reader -->
+<section id="reader" class="view reader" hidden>
+  <div id="rotor" class="rotor">
+    <header class="r-bar r-top" id="rTop">
+      <button class="icon" id="rBack" aria-label="Back">‹</button>
+      <div class="top-titles"><span id="rTitle" class="kicker"></span><span id="rChapter" class="chapter-name"></span></div>
+      <button class="icon" id="rTocBtn" aria-label="Contents">☰</button>
+      <button class="icon" id="rSetBtn" aria-label="Display settings">Aa</button>
+    </header>
+    <div id="rFrame" class="r-frame">
+      <div id="rStage" class="r-stage"></div>
+      <div class="r-zones" id="rZones"><i data-z="prev"></i><i data-z="menu"></i><i data-z="next"></i></div>
+      <p id="rLoading" class="r-loading muted">Opening book…</p>
+    </div>
+    <footer class="r-bar r-bottom" id="rBottom">
+      <input type="range" id="rSeek" min="0" max="1000" value="0" aria-label="Position in book">
+      <div class="r-status"><span id="rPct">0%</span><span id="rLeft"></span></div>
+    </footer>
+
+    <!-- Contents -->
+    <div id="rToc" class="sheet" hidden>
+      <div class="sheet-head"><b>Contents</b><button class="icon" data-close="rToc">✕</button></div>
+      <ol id="rTocList" class="toc"></ol>
+    </div>
+
+    <!-- Display settings -->
+    <div id="rSettings" class="sheet settings" hidden>
+      <div class="sheet-head"><b>Display</b><button class="icon" data-close="rSettings">✕</button></div>
+      <div class="set-row"><span>Theme</span>
+        <div class="seg" data-set="theme">
+          <button data-v="light" class="sw light">Aa</button><button data-v="sepia" class="sw sepia">Aa</button>
+          <button data-v="gray" class="sw gray">Aa</button><button data-v="dark" class="sw dark">Aa</button>
+          <button data-v="black" class="sw black">Aa</button>
+        </div>
+      </div>
+      <div class="set-row"><span>Font</span>
+        <select id="fontSel">
+          <option value="">Book's own</option>
+          <option value="Literata">Literata</option>
+          <option value="Georgia">Georgia</option>
+          <option value="Palatino">Palatino</option>
+          <option value="Source Serif 4">Source Serif</option>
+          <option value="Inter">Inter (sans)</option>
+          <option value="Atkinson Hyperlegible">Atkinson Hyperlegible</option>
+          <option value="Lexend">Lexend (easy reading)</option>
+        </select>
+      </div>
+      <div class="set-row"><span>Size</span>
+        <div class="stepper"><button data-step="size" data-d="-10">A−</button><output id="sizeOut">100%</output><button data-step="size" data-d="10">A+</button></div>
+      </div>
+      <div class="set-row"><span>Line spacing</span>
+        <div class="stepper"><button data-step="leading" data-d="-0.1">−</button><output id="leadingOut">1.5</output><button data-step="leading" data-d="0.1">+</button></div>
+      </div>
+      <div class="set-row"><span>Margins</span>
+        <div class="seg" data-set="margin"><button data-v="8">S</button><button data-v="24">M</button><button data-v="48">L</button></div>
+      </div>
+      <div class="set-row"><span>Alignment</span>
+        <div class="seg" data-set="align"><button data-v="">Book</button><button data-v="left">Left</button><button data-v="justify">Justify</button></div>
+      </div>
+      <div class="set-row"><span>Layout</span>
+        <div class="seg" data-set="flow"><button data-v="paginated">Pages</button><button data-v="scrolled-doc">Scroll</button></div>
+      </div>
+      <div class="set-row"><span>Rotation</span>
+        <div class="seg" data-set="rotate"><button data-v="0">0°</button><button data-v="90">90°</button><button data-v="180">180°</button><button data-v="270">270°</button></div>
+      </div>
+      <div class="set-row"><span>Full screen</span><button class="secondary small-btn" id="fsBtn">Enter</button></div>
+    </div>
+  </div>
+</section>
+
+<audio id="audio" preload="auto"></audio>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
