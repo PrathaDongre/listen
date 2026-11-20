@@ -56,6 +56,7 @@ def library():
             c["file"] = f
             c["timed"] = os.path.exists(os.path.join(d, f[:-4] + ".json"))
             chapters.append(c)
+        chapters.sort(key=lambda c: c.get("n", 0))  # by number: 100 comes after 99, not after 10
         books.append({"id": folder, "title": meta.get("title", folder), "author": meta.get("author", ""),
                       "voice": meta.get("voice", ""), "total": meta.get("total", len(chapters)),
                       "cover": os.path.exists(os.path.join(d, "cover.jpg")), "epub": has_epub,

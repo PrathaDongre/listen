@@ -101,7 +101,7 @@ const DriveSource = {
         const c = { ...(known[f.name] || { n: m ? +m[1] : 0, title: m ? m[2] : f.name, duration: (+f.size || 0) / 4000 }) };
         c.file = f.name; c.timed = !!by[f.name.replace(/\.mp3$/, '.json')];
         return c;
-      });
+      }).sort((a, b) => a.n - b.n);                   // by number: 100 comes after 99, not after 10
       if (!by['book.json']) return null;              // not a book folder (e.g. voice samples)
       return { id: s.name, title: meta.title || s.name, author: meta.author || '', voice: meta.voice || '', speed: meta.speed,
                total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by,
@@ -130,7 +130,8 @@ const fmt = s => {
 const fmtLong = s => { const m = Math.max(0, Math.round(s / 60)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
 const hue = str => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const cleanTitle = t => t.replace(/^\s*\d+\s*[:.]\s*/, '');
+const cleanTitle = t => /^\s*\d+\s*(\(|$)/.test(t) ? 'Chapter ' + t.trim()   // "13 (part 1 of 2)" → "Chapter 13 (part 1 of 2)"
+  : t.replace(/^\s*\d+\s*[:.]\s*/, '');
 const hasAudio = b => b.chapters.length > 0;
 /* Books without audio can still be speed-read from their text (text.json, made by book2mp3.py --text-only). */
 const textOnly = b => !!b && !hasAudio(b) && (b.text || []).length > 0;
@@ -172,14 +173,40 @@ let books = [];
 function show(id) { for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== id; }
 const findBook = id => books.find(b => b.id === id);
 
-async function loadBooks() { books = await Source.books(); }
+/* The book list is kept from last time, so pages open instantly; a fresh copy is fetched quietly
+ * in the background (a thin bar at the top shows it's working) and the page updates if anything changed. */
+const BOOKS_KEY = () => 'listen-books-' + Source.name;
+let booksLoading = null;
+function loadBooks() {
+  return (booksLoading ||= (async () => {
+    busy(+1);
+    try {
+      const fresh = await Source.books();
+      const changed = JSON.stringify(fresh) !== JSON.stringify(books);
+      books = fresh;
+      try { localStorage.setItem(BOOKS_KEY(), JSON.stringify(fresh)); } catch {}
+      return changed;
+    } finally { busy(-1); booksLoading = null; }
+  })());
+}
+let busyCount = 0;
+function busy(d) { busyCount = Math.max(0, busyCount + d); $('busy').hidden = !busyCount; }
 
 async function route() {
   if (Source === DriveSource && !DriveSource.token) return show('signin');
-  const [, view, id, n] = location.hash.split('/').map(decodeURIComponent);
-  try {
-    if (!books.length || !view || view === 'book' || view === 'stats') await loadBooks();
-  } catch (e) { console.error(e); }
+  const hash = location.hash;
+  const [, view, id, n] = hash.split('/').map(decodeURIComponent);
+  if (!books.length) try { books = JSON.parse(localStorage.getItem(BOOKS_KEY()) || '[]'); } catch {}
+  if (!books.length) {                                   // first time: nothing to show yet
+    show('loading');
+    try { await loadBooks(); } catch (e) { console.error(e); }
+    if (location.hash !== hash) return;
+  } else if (!view || view === 'book' || view === 'stats') {
+    loadBooks().then(changed => { if (changed && location.hash === hash) render(view, id, n); }).catch(e => console.error(e));
+  }
+  render(view, id, n);
+}
+function render(view, id, n) {
   if (view !== 'read') closeReader();
   if (view !== 'play' && SR.playing) stopSilent();     // silent reading only runs while you're looking at it
   if (view === 'book') return showBook(findBook(id));
@@ -190,7 +217,7 @@ async function route() {
 }
 addEventListener('hashchange', route);
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g) location.hash = g.dataset.go; });
-$('refreshBtn').onclick = async () => { await loadBooks(); showLibrary(); };
+$('refreshBtn').onclick = async () => { try { await loadBooks(); } catch (e) { console.error(e); } showLibrary(); };
 
 /* ---------------- library */
 function showLibrary() {
@@ -808,7 +835,9 @@ async function openReader(b) {
       spread: s.columns === 'one' || s.flow !== 'paginated' ? 'none' : 'auto', minSpreadWidth: 800 });
     R.rendition.hooks.content.register(styleContents);
     R.rendition.on('relocated', onRelocated);
-    R.rendition.on('click', () => { if (rset().flow !== 'paginated') toggleImmersive(); });
+    R.rendition.on('click', readerTap);                // taps and swipes are read inside the page itself,
+    R.rendition.on('touchstart', readerTouchStart);    // so pressing and dragging can still select text
+    R.rendition.on('touchend', readerTouchEnd);
     R.rendition.on('keyup', readerKeys);
     R.rendition.on('selected', (cfi, contents) => Hooks.selected(cfi, contents));
     await R.rendition.display(Store.cfi(b.id) || undefined);
@@ -910,21 +939,37 @@ function readerKeys(e) {
 }
 document.addEventListener('keyup', e => { if (!e.target.matches?.('input, select')) readerKeys(e); });
 function toggleImmersive() { $('reader').classList.toggle('immersive'); $('rToc').hidden = true; $('rSettings').hidden = true; }
-let touch = null;
-$('rZones').addEventListener('touchstart', e => { touch = e.touches[0]; }, { passive: true });
-$('rZones').addEventListener('touchend', e => {
-  if (!touch) return;
-  const t = e.changedTouches[0];
-  let dx = t.clientX - touch.clientX, dy = t.clientY - touch.clientY;
-  const rot = +rset().rotate;                          // turn the swipe into the book's own direction
-  [dx, dy] = rot === 90 ? [dy, -dx] : rot === 180 ? [-dx, -dy] : rot === 270 ? [-dy, dx] : [dx, dy];
+/* Tap the left 30% to go back, the right 30% to go forward, the middle for the menus; swipe to turn.
+ * A tap only counts if no text got selected (press-and-hold, double-click or drag selects instead). */
+let touch = null, lastSwipe = 0, tapTimer = 0;
+const selectedIn = contents => !!String(contents?.window?.getSelection?.() || '').trim();
+function tapSpot(e, contents) {                       // where across the page the tap was, 0 (left) to 1 (right)
+  const frame = $('rFrame'), el = contents.document.defaultView.frameElement;
+  let x = e.clientX;
+  for (let p = el.parentElement; p && p !== frame; p = p.parentElement) x -= p.scrollLeft;
+  for (let o = el; o && o !== frame && frame.contains(o); o = o.offsetParent) x += o.offsetLeft;
+  return x / (frame.clientWidth || 1);
+}
+function readerTap(e, contents) {
+  if (e.target?.closest?.('a[href]') || selectedIn(contents) || Date.now() - lastSwipe < 500) return;
+  const spot = tapSpot(e, contents);
+  clearTimeout(tapTimer);
+  tapTimer = setTimeout(() => {                       // wait a moment: a double-click selects a word instead
+    if (selectedIn(contents)) return;
+    if (rset().flow !== 'paginated') return toggleImmersive();
+    spot < 0.3 ? go(-1) : spot > 0.7 ? go(1) : toggleImmersive();
+  }, 250);
+}
+function readerTouchStart(e) { const t = e.changedTouches[0]; touch = t && { x: t.clientX, y: t.clientY, at: Date.now() }; }
+function readerTouchEnd(e, contents) {
+  const t = e.changedTouches[0], s = touch;
   touch = null;
-  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { e.preventDefault(); go(dx < 0 ? 1 : -1); }
-});
-$('rZones').onclick = e => {
-  const z = e.target.dataset.z;
-  if (z === 'next') go(1); else if (z === 'prev') go(-1); else toggleImmersive();
-};
+  if (!s || !t || selectedIn(contents) || rset().flow !== 'paginated') return;
+  const dx = t.clientX - s.x, dy = t.clientY - s.y;     // measured inside the page, so already in the book's direction
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - s.at < 800) {
+    lastSwipe = Date.now(); clearTimeout(tapTimer); go(dx < 0 ? 1 : -1);
+  }
+}
 $('rBack').onclick = () => { location.hash = `#/book/${enc(R.id || '')}`; };
 $('rTocBtn').onclick = () => { $('rSettings').hidden = true; $('rToc').hidden = !$('rToc').hidden; };
 $('rSetBtn').onclick = () => { $('rToc').hidden = true; $('rSettings').hidden = !$('rSettings').hidden; };
@@ -948,7 +993,6 @@ function applyReaderChrome() {
   const s = rset(), el = $('reader');
   el.dataset.theme = s.theme; el.dataset.rotate = s.rotate;
   $('rStage').style.inset = `8px ${s.margin}px`;
-  $('rZones').classList.toggle('scroll', s.flow !== 'paginated');
   document.querySelectorAll('#rSettings .seg').forEach(seg =>
     seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', String(s[seg.dataset.set]) === b.dataset.v)));
   $('fontSel').value = s.font;
@@ -996,11 +1040,8 @@ setRate(rate());
       $('signinMsg').textContent = '';
       try {
         await DriveSource.signIn('select_account');
-        $('signinMsg').textContent = 'Loading your library…';
-        await loadBooks();
-        $('signinMsg').textContent = '';
         Hooks.signedIn();
-        route();
+        route();                                       // shows last time's library at once, or the loading screen
       } catch (e) { $('signinMsg').textContent = e.message; }
     };
   }
