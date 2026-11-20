@@ -59,7 +59,7 @@ def library():
         books.append({"id": folder, "title": meta.get("title", folder), "author": meta.get("author", ""),
                       "voice": meta.get("voice", ""), "total": meta.get("total", len(chapters)),
                       "cover": os.path.exists(os.path.join(d, "cover.jpg")), "epub": has_epub,
-                      "chapters": chapters})
+                      "speed": meta.get("speed"), "text": meta.get("text", []), "chapters": chapters})
     return books
 
 

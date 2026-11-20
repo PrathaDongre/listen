@@ -35,6 +35,7 @@ const LocalSource = {
     return r.ok ? r.json() : null;
   },
   async epub(b) { return (await fetch(`books/${enc(b.id)}/book.epub`)).arrayBuffer(); },
+  async text(b) { const r = await fetch(`books/${enc(b.id)}/text.json`); if (!r.ok) throw new Error('No text for this book'); return r.json(); },
 };
 
 const DriveSource = {
@@ -103,7 +104,8 @@ const DriveSource = {
       });
       if (!by['book.json']) return null;              // not a book folder (e.g. voice samples)
       return { id: s.name, title: meta.title || s.name, author: meta.author || '', voice: meta.voice || '', speed: meta.speed,
-               total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by };
+               total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by,
+               text: by['text.json'] ? meta.text || [] : [] };
     }));
     return books.filter(Boolean).sort((a, b) => a.title.localeCompare(b.title));
   },
@@ -114,6 +116,7 @@ const DriveSource = {
     return f ? JSON.parse(await (await this.file(f)).text()) : null;
   },
   async epub(b) { return (await this.file(b._files['book.epub'])).arrayBuffer(); },
+  async text(b) { return JSON.parse(await (await this.file(b._files['text.json'])).text()); },
 };
 
 let Source = LocalSource;
@@ -129,6 +132,9 @@ const hue = str => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cleanTitle = t => t.replace(/^\s*\d+\s*[:.]\s*/, '');
 const hasAudio = b => b.chapters.length > 0;
+/* Books without audio can still be speed-read from their text (text.json, made by book2mp3.py --text-only). */
+const textOnly = b => !!b && !hasAudio(b) && (b.text || []).length > 0;
+const chaptersOf = b => hasAudio(b) ? b.chapters : (b.text || []);
 
 async function cover(el, b) {
   el.innerHTML = '';
@@ -152,6 +158,10 @@ async function cover(el, b) {
 function bookSeconds(b) { return b.chapters.reduce((a, c) => a + (c.duration || 0), 0); }
 function bookProgress(b) {
   const p = Store.pos(b.id);
+  if (p && textOnly(b)) {
+    const all = b.text.reduce((a, c) => a + c.words, 0);
+    return Math.min(1, (b.text.filter(c => c.n < p.n).reduce((a, c) => a + c.words, 0) + (p.t || 0)) / (all || 1));
+  }
   if (!p || !hasAudio(b)) return 0;
   const done = b.chapters.filter(c => c.n < p.n).reduce((a, c) => a + c.duration, 0) + (p.t || 0);
   return Math.min(1, done / (bookSeconds(b) || 1));
@@ -171,6 +181,7 @@ async function route() {
     if (!books.length || !view || view === 'book' || view === 'stats') await loadBooks();
   } catch (e) { console.error(e); }
   if (view !== 'read') closeReader();
+  if (view !== 'play' && SR.playing) stopSilent();     // silent reading only runs while you're looking at it
   if (view === 'book') return showBook(findBook(id));
   if (view === 'play') return showPlayer(findBook(id), +n);
   if (view === 'read') return openReader(findBook(id));
@@ -190,11 +201,11 @@ function showLibrary() {
   const last = findBook(Store.data.last);
   $('hero').hidden = !last;
   if (last) {
-    const p = Store.pos(last.id), ch = p && last.chapters.find(c => c.n === p.n);
+    const p = Store.pos(last.id), ch = p && chaptersOf(last).find(c => c.n === p.n);
     const hero = $('hero');
     hero.innerHTML = `<div class="cover thumb"></div><div class="info"><span class="label">Continue</span>
       <span class="t">${esc(last.title)}</span>
-      <span class="c">${ch ? esc(cleanTitle(ch.title)) + ' · ' + fmtLong(bookSeconds(last) * (1 - bookProgress(last))) + ' left' : esc(last.author)}</span>
+      <span class="c">${ch ? esc(cleanTitle(ch.title)) + (hasAudio(last) ? ' · ' + fmtLong(bookSeconds(last) * (1 - bookProgress(last))) + ' left' : '') : esc(last.author)}</span>
       <div class="bar"><i style="width:${(bookProgress(last) * 100).toFixed(1)}%"></i></div></div>
       <button class="go" aria-label="Continue">${ch ? '▶' : '📖'}</button>`;
     cover(hero.firstChild, last);
@@ -203,7 +214,8 @@ function showLibrary() {
   for (const b of books) {
     const card = document.createElement('button');
     card.className = 'book-card';
-    const rec = hasAudio(b) ? (b.chapters.length < b.total ? `<span class="pill on">🎧 ${b.chapters.length}/${b.total}</span>` : '<span class="pill on">🎧 Audio</span>') : '';
+    const rec = hasAudio(b) ? (b.chapters.length < b.total ? `<span class="pill on">🎧 ${b.chapters.length}/${b.total}</span>` : '<span class="pill on">🎧 Audio</span>')
+      : textOnly(b) ? '<span class="pill on">Speed read</span>' : '';
     card.innerHTML = `<div class="cover"></div><span class="t">${esc(b.title)}</span><span class="a">${esc(b.author)}</span>
       <div class="tags">${rec}${b.epub ? '<span class="pill">📖 EPUB</span>' : ''}</div>
       ${bookProgress(b) ? `<div class="bar"><i style="width:${(bookProgress(b) * 100).toFixed(1)}%"></i></div>` : ''}`;
@@ -222,23 +234,27 @@ async function showBook(b) {
   $('bookTitle').textContent = b.title;
   $('bookAuthor').textContent = b.author;
   const recorded = hasAudio(b) && b.chapters.length < b.total ? ` · ${b.chapters.length} of ${b.total} recorded so far` : '';
-  $('bookMeta').textContent = hasAudio(b) ? `${b.chapters.length} chapters · ${fmtLong(bookSeconds(b))}${recorded}` : 'EPUB only';
-  const p = Store.pos(b.id);
-  $('listenBtn').hidden = !hasAudio(b);
-  $('listenBtn').textContent = p ? '▶ Continue' : '▶ Listen';
-  $('listenBtn').onclick = () => location.hash = `#/play/${enc(b.id)}/${p ? p.n : b.chapters[0].n}`;
+  const tWords = (b.text || []).reduce((a, c) => a + c.words, 0);
+  $('bookMeta').textContent = hasAudio(b) ? `${b.chapters.length} chapters · ${fmtLong(bookSeconds(b))}${recorded}`
+    : textOnly(b) ? `${b.text.length} chapters · ${tWords.toLocaleString()} words · no audio yet` : 'EPUB only';
+  const p = Store.pos(b.id), chs = chaptersOf(b);
+  $('listenBtn').hidden = !chs.length;
+  $('listenBtn').textContent = hasAudio(b) ? (p ? '▶ Continue' : '▶ Listen') : (p ? 'Continue' : 'Speed read');
+  $('listenBtn').onclick = () => location.hash = `#/play/${enc(b.id)}/${p ? p.n : chs[0].n}`;
   $('readBtn').hidden = !b.epub;
   $('readBtn').onclick = () => location.hash = `#/read/${enc(b.id)}`;
-  $('chaptersTitle').hidden = !hasAudio(b);
+  $('chaptersTitle').hidden = !chs.length;
   $('noAudio').hidden = hasAudio(b);
+  $('noAudio').textContent = textOnly(b) ? 'No audio recorded for this book yet — you can speed-read it or read the book.'
+    : 'No audio recorded for this book yet — you can still read it.';
   const list = $('chapterList');
   list.innerHTML = '';
-  for (const c of b.chapters) {
+  for (const c of chs) {
     const li = document.createElement('li');
     const cls = p && p.n === c.n ? 'now' : p && c.n < p.n ? 'done' : '';
     li.innerHTML = `<button class="${cls}"><span class="n">${c.n}</span>
-      <span class="ttl">${esc(cleanTitle(c.title))}${c.timed ? '' : '<span class="badge">audio only</span>'}</span>
-      <span class="d">${fmt(c.duration)}</span></button>`;
+      <span class="ttl">${esc(cleanTitle(c.title))}${c.timed || !hasAudio(b) ? '' : '<span class="badge">audio only</span>'}</span>
+      <span class="d">${hasAudio(b) ? fmt(c.duration) : fmtLong(c.words * 60 / wpm())}</span></button>`;
     li.firstChild.onclick = () => location.hash = `#/play/${enc(b.id)}/${c.n}`;
     list.appendChild(li);
   }
@@ -251,13 +267,14 @@ let cur = -1;
 let pendingStart = 0, autoNext = false, loadSeq = 0;
 
 async function showPlayer(b, n) {
-  if (!b || !hasAudio(b)) return (location.hash = b ? `#/book/${enc(b.id)}` : '#/');
+  if (!b || !chaptersOf(b).length) return (location.hash = b ? `#/book/${enc(b.id)}` : '#/');
   show('player');
-  const ch = b.chapters.find(c => c.n === n) || b.chapters[0];
+  const ch = chaptersOf(b).find(c => c.n === n) || chaptersOf(b)[0];
   if (book?.id === b.id && chapter?.n === ch.n) { book = b; chapter = ch; return; }
   const seq = ++loadSeq;
-  const wasPlaying = !audio.paused || autoNext;
+  const wasPlaying = !audio.paused || SR.playing || autoNext;
   autoNext = false;
+  stopSilent(false);
   audio.pause();
   book = b; chapter = ch;
   Store.setLast(b.id);
@@ -266,10 +283,21 @@ async function showPlayer(b, n) {
   $('toReader').hidden = !b.epub;
   const p = Store.pos(b.id);
   pendingStart = p && p.n === ch.n ? p.t : 0;
+  $('rsvpToggle').checked = textOnly(b) || !!Store.data.rsvp;
   renderText(null, true);
   showStat();
   let url, data;
   try {
+    if (textOnly(b)) {                                   // no audio: just the words, for the silent speed reader
+      audio.removeAttribute('src'); audio.load();
+      data = await chapterText(b, ch);
+      if (seq !== loadSeq) return;
+      Store.setPos(b.id, ch.n, pendingStart);
+      renderText(data, false, pendingStart);
+      pendingStart = 0;
+      if (wasPlaying) startSilent();
+      return tick(true);
+    }
     [url, data] = await Promise.all([
       Source.audioUrl(b, ch),
       Source.timing(b, ch).catch(e => { console.warn('timing', e); return null; }),   // no text is better than no audio
@@ -279,7 +307,7 @@ async function showPlayer(b, n) {
     if (seq !== loadSeq) return;
     $('noText').hidden = false;
     $('noText').querySelector('strong').textContent = 'Couldn’t load this chapter';
-    $('noText').querySelector('.muted').textContent = /sign|401|token/i.test(e.message)
+    $('noText').querySelector('.muted').textContent = /sign|401|token/i.test(e.message || '')
       ? 'Your Google sign-in may have expired. Go back to the library and sign in again.'
       : 'Check your internet connection, then tap the chapter again.';
     return;
@@ -292,30 +320,38 @@ async function showPlayer(b, n) {
   audio.preservesPitch = true;
   Store.setPos(b.id, ch.n, pendingStart);
   mediaSession();
-  renderText(data);
-  if (wasPlaying) audio.play().catch(() => {});
+  renderText(data, false, null);
+  if (wasPlaying) silent() ? startSilent() : audio.play().catch(() => {});
   tick(true);
+}
+const textCache = {};
+async function chapterText(b, ch) {
+  const all = await (textCache[b.id] ||= Source.text(b).catch(e => { delete textCache[b.id]; throw e; }));
+  const c = all.chapters.find(x => x.n === ch.n);
+  if (!c) throw new Error('This chapter’s text is missing');
+  return { paras: c.paras.map(p => ({ title: p.title, w: p.t.split(' ').map(t => [t, null, null]) })) };
 }
 $('toBook').onclick = () => location.hash = `#/book/${enc(book.id)}`;
 $('toReader').onclick = () => { Hooks.jumpFromPlayer(); location.hash = `#/read/${enc(book.id)}`; };
 
-function renderText(data, loading) {
+function renderText(data, loading, startAt) {
   const view = $('textView');
   view.innerHTML = '';
   words = []; cur = -1;
   $('noText').hidden = !!data || loading;
   if (!data && !loading) cover($('noTextCover'), book);
-  $('rsvpToggle').disabled = !data;
+  $('rsvpToggle').disabled = !data || textOnly(book);
   if (!data) return applyMode();
   const frag = document.createDocumentFragment();
   for (const para of data.paras) {
     const el = document.createElement(para.title ? 'h3' : 'p');
+    const ps = words.length;
     para.w.forEach(([text, s, e], k) => {
       if (k) el.appendChild(document.createTextNode(' '));
       const span = document.createElement('span');
       span.className = 'w'; span.textContent = text; span.dataset.i = words.length;
       el.appendChild(span);
-      words.push({ s, e, el: span, text });
+      words.push({ s, e, el: span, text, ps: words.length === ps, h: !!para.title });
     });
     frag.appendChild(el);
   }
@@ -324,6 +360,9 @@ function renderText(data, loading) {
     if (words[i].e == null) words[i].e = words[i].s;
   }
   view.appendChild(frag);
+  prepareSpeedReading();
+  if (startAt != null && words.length) cur = Math.min(words.length - 1, Math.max(0, Math.round(startAt)));
+  else if (words.length && pendingStart) cur = Math.max(0, wordAt(pendingStart + 0.02));
   applyMode();
 }
 
@@ -334,8 +373,8 @@ function wordAt(t) {
 }
 
 function highlight(i, jump) {
-  if (i === cur) return;
-  const prev = cur;
+  if (i === cur && !jump) return;
+  const prev = i === cur ? -1 : cur;
   cur = i;
   if (prev < 0 || Math.abs(i - prev) > 400) {
     words.forEach((w, k) => { w.el.classList.toggle('read', k < i); w.el.classList.toggle('now', k === i); });
@@ -363,14 +402,140 @@ function pivot(word) {
   return lead + (n <= 1 ? 0 : n <= 5 ? 1 : n <= 9 ? 2 : n <= 13 ? 3 : 4);
 }
 function showRsvp(i) {
-  const w = words[i].text, k = pivot(w), el = $('rsvpWord').children;
-  el[0].textContent = w.slice(0, k); el[1].textContent = w[k] || ''; el[2].textContent = w.slice(k + 1);
+  const [ga, gb] = groupOf(i);
+  const w = words.slice(ga, gb).map(x => x.text).join(' '), el = $('rsvpWord').children;
+  let k = pivot(w); if (w[k] === ' ') k++;          // never put the focus letter on the gap in a pair
+  const near = (a, b) => esc(words.slice(Math.max(0, a), Math.max(0, b)).map(x => x.text).join(' '));
+  const before = near(ga - 5, ga), after = near(gb, gb + 5);
+  el[0].innerHTML = (before ? `<span class="ctx">${before} </span>` : '') + `<span>${esc(w.slice(0, k))}</span>`;
+  el[1].textContent = w[k] || '';
+  el[2].innerHTML = `<span>${esc(w.slice(k + 1))}</span>` + (after ? `<span class="ctx"> ${after}</span>` : '');
   const a = Math.max(0, i - 6), b = Math.min(words.length, i + 7);
-  $('rsvpContext').innerHTML = words.slice(a, b).map((x, j) => a + j === i ? `<b>${esc(x.text)}</b>` : esc(x.text)).join(' ');
+  $('rsvpContext').innerHTML = words.slice(a, b).map((x, j) => a + j >= ga && a + j < gb ? `<b>${esc(x.text)}</b>` : esc(x.text)).join(' ');
+}
+
+/* ---------------- silent speed reading
+ * The speed reader either follows the audio (every word shown is the word being spoken), or runs
+ * silently on its own clock at a set words-per-minute. Only one of the two ever runs: the silent
+ * clock pauses the audio, and when you go back to the audio it starts from the word you were on. */
+const SR = { on: false, playing: false, timer: 0, warm: 0, lastStop: 0, mean: 1, lastRewind: 0 };
+const SR_DEF = { mode: 'audio', wpm: 300, warm: true, group: true };
+const srs = () => ({ ...SR_DEF, ...(Store.data.sr || {}) });
+const setSr = o => { Store.data.sr = { ...srs(), ...o }; Store.save(); };
+const wpm = () => srs().wpm;
+const silent = () => rsvpOn() && (textOnly(book) || srs().mode === 'silent');
+const SENT_END = /[.!?…]["'’”)\]]*$/u, CLAUSE_END = /[,;:—–]["'’”)\]]*$/u;
+const core = t => t.replace(/[^\p{L}\p{N}]/gu, '');
+
+function prepareSpeedReading() {
+  let tot = 0;
+  for (let k = 0; k < words.length; k++) {            // how long each word stays up, relative to an average word
+    const w = words[k], n = core(w.text).length;
+    let f = 1;
+    if (n >= 9) f += 0.3;
+    if (n >= 13) f += 0.3;
+    if (CLAUSE_END.test(w.text)) f += 0.5;
+    if (SENT_END.test(w.text)) f += 1;
+    if (words[k + 1]?.ps || w.h) f += 0.8;
+    w.f = f; tot += f;
+  }
+  SR.mean = words.length ? tot / words.length : 1;     // so the average really is the words-per-minute you set
+  for (let k = 0; k < words.length;) {                 // pair up short words: "of the", "in a", "it was"
+    const a = words[k], b = words[k + 1];
+    const pair = b && !b.ps && !a.h && !b.h && !/[^\p{L}\p{N}]$/u.test(a.text) && !/^[^\p{L}\p{N}]/u.test(b.text)
+      && core(a.text).length <= 3 && core(b.text).length <= 3 && a.text.length + b.text.length <= 8;
+    const e = pair ? k + 2 : k + 1;
+    for (let j = k; j < e; j++) { words[j].g = k; words[j].ge = e; }
+    k = e;
+  }
+}
+const groupOf = i => srs().group && words[i]?.g != null ? [words[i].g, words[i].ge] : [i, i + 1];
+
+function warmFactor(start) {                           // ease in: 75% of your speed, rising to 100% over 20 s
+  if (!start || !srs().warm) return 1;
+  const p = (Date.now() - start) / 20000;
+  return p >= 1 ? 1 : 0.75 + 0.25 * p;
+}
+function silentDelay(i) {
+  const [a, b] = groupOf(i);
+  let f = 0;
+  for (let k = a; k < b; k++) f += words[k].f || 1;
+  return f / SR.mean * 60000 / (wpm() * warmFactor(SR.warm));
+}
+function silentStep() {
+  SR.timer = 0;
+  if (!SR.playing) return;
+  const next = groupOf(cur)[1];
+  if (next >= words.length) {                          // end of chapter: carry on into the next one
+    SR.playing = false; SR.lastStop = Date.now();
+    const nx = sibling(1);
+    if (nx) { autoNext = true; openChapter(nx); } else { savePos(); tick(false); }
+    return;
+  }
+  highlight(next);
+  if (Date.now() - lastSave > 5000) savePos();
+  sync(false);
+  SR.timer = setTimeout(silentStep, silentDelay(next));
+}
+function startSilent() {
+  if (!words.length || SR.playing) return;
+  if (!audio.paused) audio.pause();
+  if (cur < 0) highlight(0, true);
+  if (cur >= words.length - 1) highlight(0, true);
+  SR.playing = true;
+  SR.warm = Date.now() - SR.lastStop > 5000 ? Date.now() : 0;   // a quick pause doesn't restart the warm-up
+  clearTimeout(SR.timer);
+  SR.timer = setTimeout(silentStep, silentDelay(cur));
+  tick(false);
+}
+/* Stops the silent clock and parks the audio on the word you're on, so the two never drift apart. */
+function stopSilent(save = true) {
+  clearTimeout(SR.timer); SR.timer = 0;
+  if (SR.playing) { SR.playing = false; SR.lastStop = Date.now(); }
+  if (save) { syncAudioToWord(); savePos(); tick(false); }
+}
+function syncAudioToWord() {
+  if (!audio.src || cur < 0 || !words[cur] || !chapter?.timed) return;
+  const t = words[cur].s;
+  if (audio.readyState >= 1) audio.currentTime = t; else pendingStart = t;
+}
+function goToWord(i) {
+  i = Math.max(0, Math.min(words.length - 1, i));
+  highlight(i, true);
+  if (SR.playing) { clearTimeout(SR.timer); SR.timer = setTimeout(silentStep, silentDelay(i)); }
+  else syncAudioToWord();
+  tick(false);
+}
+
+/* Tap the left side of the speed reader: back to the start of this sentence (tap again: the one before). */
+function sentenceStart(i) {
+  let j = Math.max(0, i);
+  while (j > 0 && !words[j].ps && !SENT_END.test(words[j - 1].text)) j--;
+  return j;
+}
+function rewind() {
+  if (cur < 0) return;
+  let j = sentenceStart(cur);
+  if (cur - j < 3 || Date.now() - SR.lastRewind < 2500) j = sentenceStart(j - 1);
+  SR.lastRewind = Date.now();
+  if (silent()) goToWord(j);
+  else { audio.currentTime = words[j].s; highlight(j, true); }
+  const fx = $('rsvpRewind');
+  fx.classList.remove('show'); void fx.offsetWidth; fx.classList.add('show');
 }
 
 let raf = 0, seeking = false, lastStat = 0;
 function sync(jump) {
+  if (silent()) {                                      // the silent clock moves the words; the bar shows words, not seconds
+    if (cur < 0 && words.length) highlight(0, true);
+    const left = words.length - Math.max(cur, 0);
+    $('seek').max = Math.max(1, words.length - 1); if (!seeking) $('seek').value = Math.max(cur, 0);
+    $('tNow').textContent = fmt(Math.max(cur, 0) * 60 / wpm());
+    $('tLeft').textContent = '-' + fmt(left * 60 / wpm());
+    if (jump && cur >= 0) showRsvp(cur);
+    if (Date.now() - lastStat > 1000) try { showStat(); } catch (e) { console.error('stat', e); }
+    return;
+  }
   if (words.length) highlight(wordAt(audio.currentTime + 0.02), jump);
   const d = audio.duration || chapter?.duration || 0;
   $('seek').max = d; if (!seeking) $('seek').value = audio.currentTime;
@@ -385,12 +550,24 @@ function sync(jump) {
 let ticker = 0;
 function tick(jump) {
   try { sync(jump); } catch (e) { console.error('player update', e); }
-  const playing = !audio.paused;                       // keep the button truthful, whatever happened
+  try { warmAudio(); } catch (e) { console.error('warm-up', e); }
+  const playing = silent() ? SR.playing : !audio.paused;   // keep the button truthful, whatever happened
   if ($('play').dataset.playing !== String(playing)) {
     $('play').dataset.playing = playing;
     $('play').textContent = playing ? '❚❚' : '▶';
     $('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
   }
+}
+/* Audio warm-up (speed reader on, sped up): start a little slower and ease up to your speed over 20 s.
+ * Only the audio's speed changes, so the words on screen stay exactly in step with it. */
+let audioWarm = 0, audioStopped = 0;
+function warmAudio() {
+  if (audio.paused || !audioWarm) return;
+  const r = rate(), lo = Math.max(1, r * 0.8);
+  const p = (Date.now() - audioWarm) / 20000;
+  const want = p >= 1 || lo >= r ? r : Math.round((lo + (r - lo) * p) * 20) / 20;
+  if (p >= 1) audioWarm = 0;
+  if (Math.abs(audio.playbackRate - want) > 0.001) audio.playbackRate = want;
 }
 function loop() {
   raf = 0;
@@ -403,78 +580,155 @@ function startLoop() {
   ticker = setInterval(() => { if (audio.paused) { clearInterval(ticker); ticker = 0; } tick(false); }, 250);
 }
 
-audio.onplay = () => { tick(false); startLoop(); };
+audio.onplay = () => {
+  if (silent()) { audio.pause(); return; }          // never both at once
+  audioWarm = rsvpOn() && srs().warm && rate() > 1 && Date.now() - audioStopped > 5000 ? Date.now() : 0;
+  if (!audioWarm) audio.playbackRate = rate();
+  tick(false); startLoop();
+};
 audio.onplaying = startLoop;
-audio.onpause = () => { tick(false); savePos(); };
+audio.onpause = () => { audioStopped = Date.now(); audioWarm = 0; audio.playbackRate = rate(); tick(false); savePos(); };
 audio.onseeked = () => tick(true);
 audio.onratechange = () => tick(false);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(true); if (!audio.paused) startLoop(); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && SR.playing) stopSilent();
+  if (!document.hidden) { tick(true); if (!audio.paused) startLoop(); }
+});
 audio.onloadedmetadata = () => { if (pendingStart) { audio.currentTime = pendingStart; pendingStart = 0; } tick(true); };
 let lastSave = 0;
 audio.ontimeupdate = () => { if (!raf || document.hidden) tick(false); if (Date.now() - lastSave > 5000) savePos(); };
-function savePos() { if (book && audio.src) { lastSave = Date.now(); Store.setPos(book.id, chapter.n, audio.currentTime); } }
+function savePos() {
+  if (!book || !chapter) return;
+  lastSave = Date.now();
+  if (textOnly(book)) return Store.setPos(book.id, chapter.n, Math.max(cur, 0));
+  if (!audio.src) return;
+  Store.setPos(book.id, chapter.n, silent() && cur >= 0 && chapter.timed ? words[cur].s : audio.currentTime);
+}
 audio.onended = () => { const nx = sibling(1); if (nx) { autoNext = true; openChapter(nx); } };
-function sibling(d) { return book.chapters[book.chapters.indexOf(chapter) + d]; }
+function sibling(d) { const l = chaptersOf(book); return l[l.indexOf(chapter) + d]; }
 function openChapter(c) { if (c) { Store.setPos(book.id, c.n, 0); location.hash = `#/play/${enc(book.id)}/${c.n}`; } }
 
-const togglePlay = () => audio.paused ? audio.play().catch(() => {}) : audio.pause();
+const togglePlay = () => silent() ? (SR.playing ? stopSilent() : startSilent())
+  : audio.paused ? audio.play().catch(() => {}) : audio.pause();
 $('play').onclick = togglePlay;
-$('back15').onclick = () => audio.currentTime = Math.max(0, audio.currentTime - 15);
-$('fwd15').onclick = () => audio.currentTime = Math.min(audio.duration || 1e9, audio.currentTime + 15);
-$('prevCh').onclick = () => audio.currentTime > 5 ? (audio.currentTime = 0) : openChapter(sibling(-1));
+const skipWords = () => Math.round(wpm() / 4);         // 15 seconds' worth of words
+$('back15').onclick = () => silent() ? goToWord(cur - skipWords()) : audio.currentTime = Math.max(0, audio.currentTime - 15);
+$('fwd15').onclick = () => silent() ? goToWord(cur + skipWords()) : audio.currentTime = Math.min(audio.duration || 1e9, audio.currentTime + 15);
+$('prevCh').onclick = () => silent() ? (cur > 20 ? goToWord(0) : openChapter(sibling(-1)))
+  : audio.currentTime > 5 ? (audio.currentTime = 0) : openChapter(sibling(-1));
 $('nextCh').onclick = () => openChapter(sibling(1));
-$('seek').oninput = () => { seeking = true; $('tNow').textContent = fmt(+$('seek').value); };
-$('seek').onchange = () => { seeking = false; audio.currentTime = +$('seek').value; };
+$('seek').oninput = () => { seeking = true; $('tNow').textContent = fmt(silent() ? +$('seek').value * 60 / wpm() : +$('seek').value); };
+$('seek').onchange = () => { seeking = false; silent() ? goToWord(Math.round(+$('seek').value)) : audio.currentTime = +$('seek').value; };
 $('textView').onclick = e => {
   const w = e.target.closest('.w');
   if (!w || String(getSelection()).trim()) return;      // selecting text, not tapping a word
   audio.currentTime = words[+w.dataset.i].s;
   if (audio.paused) audio.play().catch(() => {});
 };
-document.querySelector('.rsvp').onclick = togglePlay;
+$('rsvpView').onclick = e => {
+  if (e.target.closest('.sr-bar, .sr-opts')) return;
+  const r = $('rsvpView').getBoundingClientRect();
+  if (e.clientX - r.left < r.width / 3) rewind(); else togglePlay();
+};
 
 /* Speed: a multiplier on top of the speed the book was recorded at. */
 function rate() { return Store.data.rate || 1; }
 function setRate(r) {
+  if (r < rate() && audioWarm) r = Math.min(r, audio.playbackRate - 0.1);   // slower than what you're hearing now
   r = Math.min(3, Math.max(0.5, Math.round(r * 20) / 20));
+  if (r < rate()) audioWarm = 0;                       // slowing down: straight to the new speed, no easing
   Store.data.rate = r; Store.save();
-  audio.playbackRate = r; audio.defaultPlaybackRate = r;
-  $('speedVal').textContent = r.toFixed(r * 10 % 1 ? 2 : 1) + '×';
+  audio.defaultPlaybackRate = r;
+  if (audioWarm) warmAudio(); else audio.playbackRate = r;   // still easing up: keep easing, toward the new speed
+  showSpeed();
+}
+function setWpm(w) {
+  const now = wpm() * warmFactor(SR.playing && SR.warm);
+  if (w < wpm()) { w = Math.min(w, Math.ceil(now / 25) * 25 - 25); SR.warm = 0; }   // slowing: below what you see now, no easing
+  setSr({ wpm: Math.min(1200, Math.max(100, Math.round(w / 25) * 25)) });
+  if (SR.playing) { clearTimeout(SR.timer); SR.timer = setTimeout(silentStep, silentDelay(cur)); }
+  showSpeed(); sync(false);
+}
+function showSpeed() {
+  const r = rate();
+  $('speedVal').textContent = silent() ? `${wpm()} wpm` : r.toFixed(r * 10 % 1 ? 2 : 1) + '×';
+  $('speedVal').title = silent() ? 'Words per minute. Tap to reset to 300.' : 'Tap to reset to 1.0×';
   showStat();
 }
-$('slower').onclick = () => setRate(rate() - 0.1);
-$('faster').onclick = () => setRate(rate() + 0.1);
-$('speedVal').onclick = () => setRate(1);
+$('slower').onclick = () => silent() ? setWpm(wpm() - 25) : setRate(rate() - 0.1);
+$('faster').onclick = () => silent() ? setWpm(wpm() + 25) : setRate(rate() + 0.1);
+$('speedVal').onclick = () => silent() ? setWpm(300) : setRate(1);
 
-const rsvpOn = () => $('rsvpToggle').checked && words.length > 0;
+const rsvpOn = () => words.length > 0 && ($('rsvpToggle').checked || textOnly(book));
 function applyMode() {
   $('rsvpView').hidden = !rsvpOn();
   $('textView').hidden = rsvpOn() || !words.length;
-  cur = -1; if (words.length) tick(true);
+  SR.on = silent();
+  const canSilent = rsvpOn() && !textOnly(book);
+  $('srMode').hidden = !canSilent;
+  for (const b of $('srMode').children) b.classList.toggle('on', b.dataset.m === (silent() ? 'silent' : 'audio'));
+  $('srWarm').checked = srs().warm; $('srGroup').checked = srs().group;
+  showSpeed();
+  if (silent()) { const k = cur; cur = -1; highlight(Math.max(0, k), true); tick(true); }
+  else { cur = -1; if (words.length) tick(true); }
+}
+/* Any switch between the audio and the silent clock hands over the exact word you're on,
+ * and carries on playing if you were. */
+function handover(change) {
+  const wasSilent = SR.on || SR.playing, was = wasSilent ? SR.playing : !audio.paused;   // the mode as it was on screen
+  if (wasSilent) stopSilent();                          // parks the audio on the current word
+  else if (words.length) highlight(Math.max(0, wordAt(audio.currentTime + 0.02)), true);
+  change();
+  if (wasSilent === silent()) return applyMode();
+  if (!wasSilent) audio.pause();
+  SR.lastStop = audioStopped = Date.now();              // a switch isn't a fresh start: no warm-up
+  applyMode();
+  if (was) togglePlay();
 }
 $('rsvpToggle').checked = !!Store.data.rsvp;
-$('rsvpToggle').onchange = () => { Store.data.rsvp = $('rsvpToggle').checked; Store.save(); applyMode(); };
+$('rsvpToggle').onchange = () => handover(() => { Store.data.rsvp = $('rsvpToggle').checked; Store.save(); });
+for (const b of $('srMode').children) b.onclick = e => { e.stopPropagation(); handover(() => setSr({ mode: b.dataset.m })); };
+$('srOptsBtn').onclick = e => { e.stopPropagation(); $('srOpts').hidden = !$('srOpts').hidden; };
+$('srWarm').onchange = () => setSr({ warm: $('srWarm').checked });
+$('srGroup').onchange = () => { setSr({ group: $('srGroup').checked }); if (cur >= 0) showRsvp(cur); };
 
 /* ---------------- stats line: tap to cycle */
 const STATS = [
   () => {
-    let wpm;
-    if (words.length > 20) wpm = words.length / ((words[words.length - 1].e - words[0].s) / 60) * rate();
-    else wpm = 155 * (book?.speed || 1.2) * rate();
-    return `${Math.round(wpm)} words per minute`;
+    if (silent()) return `${Math.round(wpm() * warmFactor(SR.playing && SR.warm))} words per minute${SR.playing && warmFactor(SR.warm) < 1 ? ' · warming up' : ''}`;
+    let w;
+    if (words.length > 20) w = words.length / ((words[words.length - 1].e - words[0].s) / 60) * rate();
+    else w = 155 * (book?.speed || 1.2) * rate();
+    return `${Math.round(w * (audio.paused ? 1 : audio.playbackRate / rate()))} words per minute${audioWarm ? ' · warming up' : ''}`;
   },
-  () => `${fmtLong(((audio.duration || chapter.duration) - audio.currentTime) / rate())} left in chapter`,
-  () => `${fmtLong(bookLeft() / rate())} left in book`,
-  () => `Finishes at ${new Date(Date.now() + bookLeft() / rate() * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${bookLeft() / rate() > 86400 ? ' (not today)' : ''}`,
-  () => `${Math.floor(audio.currentTime / (audio.duration || chapter.duration || 1) * 100)}% of chapter`,
-  () => `${Math.floor((1 - bookLeft() / (bookSeconds(book) || 1)) * 100)}% of book`,
-  () => `Chapter ${book.chapters.indexOf(chapter) + 1} of ${book.total || book.chapters.length}`,
+  () => `${fmtLong(chapterLeft())} left in chapter`,
+  () => `${fmtLong(timeLeft())} left in book`,
+  () => `Finishes at ${new Date(Date.now() + timeLeft() * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${timeLeft() > 86400 ? ' (not today)' : ''}`,
+  () => silent() ? `${Math.floor(Math.max(cur, 0) / (words.length || 1) * 100)}% of chapter`
+    : `${Math.floor(audio.currentTime / (audio.duration || chapter.duration || 1) * 100)}% of chapter`,
+  () => `${Math.floor(bookDone() * 100)}% of book`,
+  () => `Chapter ${chaptersOf(book).indexOf(chapter) + 1} of ${hasAudio(book) ? book.total || book.chapters.length : chaptersOf(book).length}`,
   () => words.length ? `${Math.max(0, cur + 1).toLocaleString()} of ${words.length.toLocaleString()} words in chapter` : null,
 ];
-function bookLeft() {
+const posSecs = () => silent() && cur >= 0 && chapter?.timed ? words[cur].s : audio.currentTime;
+function bookLeft() {                                  // seconds of audio left (audio books)
   if (!book) return 0;
   const after = book.chapters.filter(c => c.n > chapter.n).reduce((a, c) => a + c.duration, 0);
-  return after + ((audio.duration || chapter.duration) - audio.currentTime);
+  return after + ((audio.duration || chapter.duration) - posSecs());
+}
+function chapterLeft() {                               // real time left at your current speed
+  return silent() ? (words.length - Math.max(cur, 0)) * 60 / wpm() : ((audio.duration || chapter.duration) - audio.currentTime) / rate();
+}
+function timeLeft() {
+  if (textOnly(book)) return chapterLeft() + book.text.filter(c => c.n > chapter.n).reduce((a, c) => a + c.words, 0) * 60 / wpm();
+  return silent() ? bookLeft() * 155 * (book.speed || 1.2) / 60 / wpm() * 60 : bookLeft() / rate();
+}
+function bookDone() {
+  if (textOnly(book)) {
+    const all = book.text.reduce((a, c) => a + c.words, 0);
+    return (book.text.filter(c => c.n < chapter.n).reduce((a, c) => a + c.words, 0) + Math.max(cur, 0)) / (all || 1);
+  }
+  return 1 - bookLeft() / (bookSeconds(book) || 1);
 }
 function showStat() {
   if (!book || !chapter) return;
@@ -497,8 +751,8 @@ function mediaSession() {
   navigator.mediaSession.metadata = meta([]);
   Source.coverUrl(book).then(u => { if (u) navigator.mediaSession.metadata = meta([{ src: new URL(u, location.href).href }]); }).catch(() => {});
   const ms = navigator.mediaSession;
-  ms.setActionHandler('play', () => audio.play());
-  ms.setActionHandler('pause', () => audio.pause());
+  ms.setActionHandler('play', () => silent() ? startSilent() : audio.play());
+  ms.setActionHandler('pause', () => silent() ? stopSilent() : audio.pause());
   ms.setActionHandler('seekbackward', () => $('back15').click());
   ms.setActionHandler('seekforward', () => $('fwd15').click());
   ms.setActionHandler('previoustrack', () => $('prevCh').click());

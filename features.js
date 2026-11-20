@@ -124,6 +124,11 @@ setInterval(() => {
       lastWord = cur;
     }
     unsaved += dt;
+  } else if (SR.playing && book) {                          // silent speed reading counts as reading
+    addTime('read', Math.min(dt, 2), book.id);
+    if (lastWord >= 0 && cur > lastWord && cur - lastWord < 80) statDay().words += cur - lastWord;
+    lastWord = cur;
+    unsaved += dt;
   } else lastWord = -1;
   if (!$('reader').hidden && R.ready && !document.hidden && audio.paused && now - lastInteract < 180000) {
     addTime('read', Math.min(dt, 2), R.id);                  // reading: the book is open and you've touched it lately

@@ -82,6 +82,18 @@
   <div id="stage">
     <div id="textView" class="text-view"></div>
     <div id="rsvpView" class="rsvp" hidden>
+      <div class="sr-bar">
+        <div id="srMode" class="seg sr-mode" role="group" aria-label="Speed reader follows">
+          <button data-m="audio">With audio</button><button data-m="silent">Silent</button>
+        </div>
+        <button id="srOptsBtn" class="icon sr-gear" aria-label="Speed reader settings" title="Speed reader settings">⚙︎</button>
+        <div id="srOpts" class="sr-opts" hidden>
+          <label><input type="checkbox" id="srWarm"> Warm up: start a little slower, reach full speed in 20 s</label>
+          <label><input type="checkbox" id="srGroup"> Show short words together (“of the”, “in a”)</label>
+          <p class="muted small">Tap the left third of the screen to go back to the start of the sentence. Tap twice to go back further.</p>
+        </div>
+      </div>
+      <div id="rsvpRewind" class="rsvp-rewind" aria-hidden="true">↺</div>
       <div class="rsvp-guide top-guide"></div>
       <div id="rsvpWord" class="rsvp-word"><span class="l"></span><span class="p"></span><span class="r"></span></div>
       <div class="rsvp-guide"></div>

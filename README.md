@@ -6,7 +6,9 @@ speed reader, and an EPUB reader.
 The app itself contains no books. When opened online it asks you to sign in with Google
 and reads books from the `Audiobooks` folder in your own Google Drive. Each book is a
 folder with `book.json`, `cover.jpg`, `book.epub`, and numbered chapter `.mp3` files
-(plus a `.json` file of word timings per chapter for the synced text).
+(plus a `.json` file of word timings per chapter for the synced text). A book with no
+audio yet can have a `text.json` instead, which the speed reader reads silently at a
+set words-per-minute.
 
 - `index.html`, `style.css`, `app.js` — the app
 - `config.js` — the Google OAuth client ID (not a secret; it only works from the
