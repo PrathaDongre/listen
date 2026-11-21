@@ -203,7 +203,7 @@ function renderTabs() {
   $('rMarkList').hidden = tab === 'toc';
   if (tab === 'toc') return;
   const list = $('rMarkList'), items = marksOf(R.id, tab === 'bookmarks' ? 'bookmark' : 'highlight');
-  list.innerHTML = items.length ? '' : `<li class="empty muted">${tab === 'bookmarks' ? 'No bookmarks yet. Tap 🔖 to bookmark a page.' : 'No highlights yet. Select some text to highlight it.'}</li>`;
+  list.innerHTML = items.length ? '' : `<li class="empty muted">${tab === 'bookmarks' ? 'No bookmarks yet. Tap the bookmark button at the top to save a page.' : 'No highlights yet. Select some text to highlight it.'}</li>`;
   for (const m of items) {
     const li = document.createElement('li');
     const when = new Date(m.created || m.at).toLocaleDateString([], { day: 'numeric', month: 'short' });
@@ -211,7 +211,7 @@ function renderTabs() {
       ? `<button class="mark"><span class="mt">${esc(m.label || 'Bookmark')}</span><span class="mm">${m.pct != null ? m.pct + '% · ' : ''}${when}</span></button>`
       : `<button class="mark hl" style="--hl:${COLORS[m.color] || COLORS.yellow}"><span class="mt">“${esc(m.text.slice(0, 220))}${m.text.length > 220 ? '…' : ''}”</span><span class="mm">${esc(m.label || '')}${m.label ? ' · ' : ''}${when}</span></button>`;
     const del = document.createElement('button');
-    del.className = 'icon del'; del.textContent = '✕'; del.setAttribute('aria-label', 'Delete');
+    del.className = 'icon del'; del.innerHTML = ic('close'); del.setAttribute('aria-label', 'Delete');
     del.onclick = () => { dropMark(R.id, m.id); renderTabs(); updateBookmarkBtn(); };
     li.firstChild.onclick = () => { R.rendition.display(m.cfi); $('rToc').hidden = true; };
     li.appendChild(del);
@@ -281,10 +281,10 @@ function lookupBox() {
   if (!box) {
     box = document.createElement('div');
     box.id = 'ssLookup'; box.className = 'lookup'; box.hidden = true;
-    box.innerHTML = `<div class="lk-head"><b id="lkTerm"></b><button class="icon" id="lkClose" aria-label="Close">✕</button></div>
+    box.innerHTML = `<div class="lk-head"><b id="lkTerm"></b><button class="icon" id="lkClose" aria-label="Close">${ic('close')}</button></div>
       <div class="tabs lk-tabs"><button data-src="dict">Dictionary</button><button data-src="wiki">Wikipedia</button></div>
       <div id="lkBody" class="lk-body"></div>
-      <div class="lk-foot"><a id="lkWeb" target="_blank" rel="noopener">Search the web ↗</a></div>`;
+      <div class="lk-foot"><a id="lkWeb" target="_blank" rel="noopener">Search the web ${ic('out')}</a></div>`;
     box.querySelector('#lkClose').onclick = () => { box.hidden = true; };
     box.querySelector('.lk-tabs').onclick = e => { const b = e.target.closest('[data-src]'); if (b) loadLookup(box.dataset.term, b.dataset.src); };
   }
@@ -341,7 +341,7 @@ async function wikiSummary(title) {
   return `<div class="lk-wiki">${s.thumbnail ? `<img src="${esc(s.thumbnail.source)}" alt="">` : ''}
     <p class="lk-word">${esc(s.title)}</p>${s.description ? `<p class="muted small">${esc(s.description)}</p>` : ''}
     <p>${esc(s.extract || '')}</p>
-    <a href="${esc(s.content_urls?.mobile?.page || s.content_urls?.desktop?.page || '#')}" target="_blank" rel="noopener">Read on Wikipedia ↗</a></div>`;
+    <a href="${esc(s.content_urls?.mobile?.page || s.content_urls?.desktop?.page || '#')}" target="_blank" rel="noopener">Read on Wikipedia ${ic('out')}</a></div>`;
 }
 async function loadWikiPage(title) {
   const body = $('lkBody');

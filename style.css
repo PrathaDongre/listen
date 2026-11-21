@@ -143,8 +143,8 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .time { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 44px; }
 .time:last-child { text-align: right; }
 .transport { display: flex; justify-content: center; align-items: center; gap: 14px; }
-.skip { position: relative; font-size: 26px; }
-.skip small { position: absolute; font-size: 9px; font-weight: 700; top: 50%; left: 50%; transform: translate(-50%, -40%); }
+.skip { position: relative; font-size: 30px; }
+.skip small { position: absolute; font-size: 8px; font-weight: 700; top: 50%; left: 50%; transform: translate(-50%, -48%); }
 .play { width: 60px; height: 60px; border-radius: 30px; background: var(--accent); color: var(--accent-text); font-size: 24px; display: grid; place-items: center; }
 .options { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .speed { display: flex; align-items: center; gap: 4px; }
@@ -207,8 +207,9 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .small-btn { padding: 6px 14px; font-size: 14px; }
 
 /* ---------------- bookmarks, highlights, look-up ---------------- */
-#rMarkBtn { font-size: 18px; opacity: .45; filter: grayscale(1); }
-#rMarkBtn.on { opacity: 1; filter: none; }
+#rMarkBtn { font-size: 21px; }
+#rMarkBtn.on { color: var(--accent); }
+#rMarkBtn.on .ic { fill: currentColor; }
 .tabs { display: flex; gap: 4px; background: var(--line); border-radius: 10px; padding: 3px; }
 .tabs button { padding: 6px 12px; border-radius: 8px; font-size: 14px; color: var(--muted); }
 .tabs button.on { background: var(--raised); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
@@ -326,3 +327,17 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 
 /* each book's page and player take colours from its cover; ease between them */
 body, .controls, .chapters li button, .primary, .play, .text-view.paged { transition: background-color .45s, color .45s, border-color .45s; }
+
+/* Line icons (SVG sprite in index.html) */
+.ic { width: 1em; height: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.14em; }
+.primary .ic, .secondary .ic { margin-right: 2px; }
+.pill .ic { font-size: 12px; vertical-align: -2px; stroke-width: 2; }
+.lk-foot .ic, .wiki .ic, a .ic { font-size: .9em; }
+.pg-btn .ic { font-size: 16px; }
+.play .ic, .hero .go .ic { font-size: 24px; }
+
+/* One page or two side by side in the player */
+.pg-cols { position: absolute; right: 14px; bottom: 0; width: 34px; height: 28px; }
+.pg-cols .ic { font-size: 19px; }
+.text-view.paged.two-tight { font-size: 16px; line-height: 1.55; }
+.text-view.paged.two-tight h3 { font-size: 18px; }

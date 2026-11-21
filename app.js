@@ -130,6 +130,8 @@ const fmt = s => {
 const fmtLong = s => { const m = Math.max(0, Math.round(s / 60)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
 const hue = str => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/* Minimal line icons from the sprite in index.html (no emoji anywhere in the app). */
+const ic = n => `<svg class="ic" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 const cleanTitle = t => /^\s*\d+\s*(\(|$)/.test(t) ? 'Chapter ' + t.trim()   // "13 (part 1 of 2)" → "Chapter 13 (part 1 of 2)"
   : t.replace(/^\s*\d+\s*[:.]\s*/, '');
 const hasAudio = b => b.chapters.length > 0;
@@ -325,17 +327,17 @@ function showLibrary() {
       <span class="t">${esc(last.title)}</span>
       <span class="c">${ch ? esc(cleanTitle(ch.title)) + (hasAudio(last) ? ' · ' + fmtLong(bookSeconds(last) * (1 - bookProgress(last))) + ' left' : '') : esc(last.author)}</span>
       <div class="bar"><i style="width:${(bookProgress(last) * 100).toFixed(1)}%"></i></div></div>
-      <button class="go" aria-label="Continue">${ch ? '▶' : '📖'}</button>`;
+      <button class="go" aria-label="Continue">${ic(ch ? 'play' : 'book')}</button>`;
     cover(hero.firstChild, last);
     hero.onclick = () => location.hash = ch ? `#/play/${enc(last.id)}/${ch.n}` : `#/read/${enc(last.id)}`;
   }
   for (const b of books) {
     const card = document.createElement('button');
     card.className = 'book-card';
-    const rec = hasAudio(b) ? (b.chapters.length < b.total ? `<span class="pill on">🎧 ${b.chapters.length}/${b.total}</span>` : '<span class="pill on">🎧 Audio</span>')
+    const rec = hasAudio(b) ? (b.chapters.length < b.total ? `<span class="pill on">${ic('headphones')} ${b.chapters.length}/${b.total}</span>` : `<span class="pill on">${ic('headphones')} Audio</span>`)
       : textOnly(b) ? '<span class="pill on">Speed read</span>' : '';
     card.innerHTML = `<div class="cover"></div><span class="t">${esc(b.title)}</span><span class="a">${esc(b.author)}</span>
-      <div class="tags">${rec}${b.epub ? '<span class="pill">📖 EPUB</span>' : ''}</div>
+      <div class="tags">${rec}${b.epub ? `<span class="pill">${ic('book')} EPUB</span>` : ''}</div>
       ${bookProgress(b) ? `<div class="bar"><i style="width:${(bookProgress(b) * 100).toFixed(1)}%"></i></div>` : ''}`;
     cover(card.firstChild, b);
     card.onclick = () => location.hash = `#/book/${enc(b.id)}`;
@@ -357,7 +359,7 @@ async function showBook(b) {
     : textOnly(b) ? `${b.text.length} chapters · ${tWords.toLocaleString()} words · no audio yet` : 'EPUB only';
   const p = Store.pos(b.id), chs = chaptersOf(b);
   $('listenBtn').hidden = !chs.length;
-  $('listenBtn').textContent = hasAudio(b) ? (p ? '▶ Continue' : '▶ Listen') : (p ? 'Continue' : 'Speed read');
+  $('listenBtn').innerHTML = hasAudio(b) ? ic('play') + (p ? ' Continue' : ' Listen') : (p ? 'Continue' : 'Speed read');
   $('listenBtn').onclick = () => location.hash = `#/play/${enc(b.id)}/${p ? p.n : chs[0].n}`;
   $('readBtn').hidden = !b.epub;
   $('readBtn').onclick = () => location.hash = `#/read/${enc(b.id)}`;
@@ -533,9 +535,14 @@ function layoutPages(force) {
   if (!W || !H) return false;
   if (!force && W === PG.w && H === PG.h) return true;
   PG.w = W; PG.h = H;
-  PG.n = W >= 900 ? 2 : 1;
-  PG.pad = W < 520 ? 22 : 40;
-  PG.gap = PG.pad * 2;
+  const pref = Store.data.cols;                         // 1 or 2 if you chose; otherwise two pages only on a wide screen
+  PG.n = pref === 1 || pref === 2 ? pref : W >= 900 ? 2 : 1;
+  const tight = PG.n === 2 && W < 760;                 // two pages on a phone: smaller type, narrower margins
+  v.classList.toggle('two-tight', tight);
+  PG.pad = tight ? 14 : W < 520 ? 22 : 40;
+  PG.gap = PG.pad * 2;                                 // gap = both margins, so a turn moves exactly one screen
+  $('pgCols').innerHTML = ic(PG.n === 2 ? 'cols2' : 'cols1');
+  $('pgCols').setAttribute('aria-label', PG.n === 2 ? 'Show one page' : 'Show two pages side by side');
   PG.colW = (W - 2 * PG.pad - (PG.n - 1) * PG.gap) / PG.n;
   Object.assign(flow.style, { height: H + 'px', columnWidth: PG.colW + 'px', columnGap: PG.gap + 'px', padding: `22px ${PG.pad}px 34px` });
   PG.total = pageOf(words[words.length - 1].el) + 1;
@@ -572,6 +579,10 @@ function turnTo(k, animate) {
   if (slide) setTimeout(() => { flow.style.transition = 'none'; }, 260);
 }
 function browse(d) { PG.manual = Date.now(); turnTo(PG.cur + d, true); }
+$('pgCols').onclick = () => {
+  Store.data.cols = PG.n === 2 ? 1 : 2; Store.save();
+  if (layoutPages(true) && cur >= 0) { PG.manual = 0; setPage(pageOf(words[cur].el)); }
+};
 $('pgPrev').onclick = () => browse(-1);
 $('pgNext').onclick = () => browse(1);
 {
@@ -755,7 +766,7 @@ function tick(jump) {
   const playing = silent() ? SR.playing : !audio.paused;   // keep the button truthful, whatever happened
   if ($('play').dataset.playing !== String(playing)) {
     $('play').dataset.playing = playing;
-    $('play').textContent = playing ? '❚❚' : '▶';
+    $('play').innerHTML = ic(playing ? 'pause' : 'play');
     $('play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
   }
 }

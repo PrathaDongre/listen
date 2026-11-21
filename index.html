@@ -16,6 +16,27 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-7M12 20V5M19 20v-10"/></symbol>
+  <symbol id="i-cw" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3L19.5 9"/><path d="M19.5 4v5h-5"/></symbol>
+  <symbol id="i-ccw" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9"/><path d="M4.5 4v5h5"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.5C10.3 5.3 8 4.8 3.5 5v13c4.5-.2 6.8.3 8.5 1.5 1.7-1.2 4-1.7 8.5-1.5V5C16 4.8 13.7 5.3 12 6.5z"/><path d="M12 6.5v13"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 11 12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M19 6v12l-9.5-6z" fill="currentColor"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M5 6v12l9.5-6z" fill="currentColor"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5v14l11.5-7z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.5 4h11v16L12 16l-5.5 4z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h0M4.5 12h0M4.5 18h0" stroke-width="2.6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/></symbol>
+  <symbol id="i-cols1" viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="16" rx="1.5"/><path d="M9 8.5h6M9 12h6M9 15.5h4"/></symbol>
+  <symbol id="i-cols2" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5"/><path d="M12 4.5v15M5.5 8.5h3.5M5.5 12h3.5M15 8.5h3.5M15 12h3.5"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M8 16 16 8M9.5 8H16v6.5"/></symbol>
+</svg>
 
 <!-- Sign in (only when the books come from Google Drive) -->
 <section id="signin" class="view" hidden>
@@ -38,8 +59,8 @@
 <section id="library" class="view" hidden>
   <header class="top lib-top">
     <h1>Library</h1>
-    <button class="icon" data-go="#/stats" aria-label="Reading stats" title="Stats">📊</button>
-    <button class="icon" id="refreshBtn" aria-label="Refresh library" title="Refresh">⟳</button>
+    <button class="icon" data-go="#/stats" aria-label="Reading stats" title="Stats"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg></button>
+    <button class="icon" id="refreshBtn" aria-label="Refresh library" title="Refresh"><svg class="ic" aria-hidden="true"><use href="#i-cw"/></svg></button>
   </header>
   <div id="hero" class="hero" hidden></div>
   <h2 class="section-title" id="allTitle">All books</h2>
@@ -52,7 +73,7 @@
   <div class="book-hero">
     <div class="backdrop" id="bookBackdrop"></div>
     <header class="top">
-      <button class="icon" data-go="#/" aria-label="Back to library">‹</button>
+      <button class="icon" data-go="#/" aria-label="Back to library"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
       <div class="top-titles"></div>
     </header>
     <div class="book-head pad">
@@ -62,8 +83,8 @@
         <p id="bookAuthor" class="muted"></p>
         <p id="bookMeta" class="muted small"></p>
         <div class="book-actions">
-          <button id="listenBtn" class="primary">▶ Listen</button>
-          <button id="readBtn" class="secondary">📖 Read</button>
+          <button id="listenBtn" class="primary"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg> Listen</button>
+          <button id="readBtn" class="secondary"><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg> Read</button>
         </div>
       </div>
     </div>
@@ -76,35 +97,36 @@
 <!-- Player -->
 <section id="player" class="view" hidden>
   <header class="top">
-    <button class="icon" id="toBook" aria-label="Back to book">‹</button>
-    <button class="icon home" data-go="#/" aria-label="Library" title="Library">⌂</button>
+    <button class="icon" id="toBook" aria-label="Back to book"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+    <button class="icon home" data-go="#/" aria-label="Library" title="Library"><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg></button>
     <div class="top-titles">
       <span id="pBook" class="kicker"></span>
       <span id="pChapter" class="chapter-name"></span>
     </div>
-    <button class="icon" id="toReader" aria-label="Read the book" title="Read the book">📖</button>
+    <button class="icon" id="toReader" aria-label="Read the book" title="Read the book"><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg></button>
   </header>
 
   <div id="stage">
     <div id="textView" class="text-view paged hl-sentence"></div>
     <div id="pgBar" class="pg-bar" hidden>
-      <button id="pgPrev" class="pg-btn" aria-label="Previous page">‹</button>
+      <button id="pgPrev" class="pg-btn" aria-label="Previous page"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
       <span id="pgNum" class="pg-num"></span>
-      <button id="pgNext" class="pg-btn" aria-label="Next page">›</button>
+      <button id="pgNext" class="pg-btn" aria-label="Next page"><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
+      <button id="pgCols" class="pg-btn pg-cols" aria-label="Show two pages side by side" title="One page or two side by side"></button>
     </div>
     <div id="rsvpView" class="rsvp" hidden>
       <div class="sr-bar">
         <div id="srMode" class="seg sr-mode" role="group" aria-label="Speed reader follows">
           <button data-m="audio">With audio</button><button data-m="silent">Silent</button>
         </div>
-        <button id="srOptsBtn" class="icon sr-gear" aria-label="Speed reader settings" title="Speed reader settings">⚙︎</button>
+        <button id="srOptsBtn" class="icon sr-gear" aria-label="Speed reader settings" title="Speed reader settings"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg></button>
         <div id="srOpts" class="sr-opts" hidden>
           <label><input type="checkbox" id="srWarm"> Warm up: start a little slower, reach full speed in 20 s</label>
           <label><input type="checkbox" id="srGroup"> Show short words together (“of the”, “in a”)</label>
           <p class="muted small">Tap the left third of the screen to go back to the start of the sentence. Tap twice to go back further.</p>
         </div>
       </div>
-      <div id="rsvpRewind" class="rsvp-rewind" aria-hidden="true">↺</div>
+      <div id="rsvpRewind" class="rsvp-rewind" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#i-ccw"/></svg></div>
       <div class="rsvp-guide top-guide"></div>
       <div id="rsvpWord" class="rsvp-word"><span class="l"></span><span class="p"></span><span class="r"></span></div>
       <div class="rsvp-guide"></div>
@@ -125,11 +147,11 @@
       <span id="tLeft" class="time">-0:00</span>
     </div>
     <div class="transport">
-      <button class="icon" id="prevCh" aria-label="Previous chapter">⏮</button>
-      <button class="icon skip" id="back15" aria-label="Back 15 seconds">↺<small>15</small></button>
-      <button id="play" class="play" aria-label="Play">▶</button>
-      <button class="icon skip" id="fwd15" aria-label="Forward 15 seconds">↻<small>15</small></button>
-      <button class="icon" id="nextCh" aria-label="Next chapter">⏭</button>
+      <button class="icon" id="prevCh" aria-label="Previous chapter"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
+      <button class="icon skip" id="back15" aria-label="Back 15 seconds"><svg class="ic" aria-hidden="true"><use href="#i-ccw"/></svg><small>15</small></button>
+      <button id="play" class="play" aria-label="Play"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg></button>
+      <button class="icon skip" id="fwd15" aria-label="Forward 15 seconds"><svg class="ic" aria-hidden="true"><use href="#i-cw"/></svg><small>15</small></button>
+      <button class="icon" id="nextCh" aria-label="Next chapter"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
     </div>
     <div class="options">
       <div class="speed">
@@ -150,7 +172,7 @@
 <!-- Reading stats -->
 <section id="stats" class="view" hidden>
   <header class="top">
-    <button class="icon" data-go="#/" aria-label="Back to library">‹</button>
+    <button class="icon" data-go="#/" aria-label="Back to library"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
     <div class="top-titles"><span class="chapter-name">Reading stats</span></div>
     <span style="width:40px"></span>
   </header>
@@ -161,11 +183,11 @@
 <section id="reader" class="view reader" hidden>
   <div id="rotor" class="rotor">
     <header class="r-bar r-top" id="rTop">
-      <button class="icon" id="rBack" aria-label="Back">‹</button>
-      <button class="icon home" data-go="#/" aria-label="Library" title="Library">⌂</button>
+      <button class="icon" id="rBack" aria-label="Back"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+      <button class="icon home" data-go="#/" aria-label="Library" title="Library"><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg></button>
       <div class="top-titles"><span id="rTitle" class="kicker"></span><span id="rChapter" class="chapter-name"></span></div>
-      <button class="icon" id="rMarkBtn" aria-label="Bookmark this page" title="Bookmark this page">🔖</button>
-      <button class="icon" id="rTocBtn" aria-label="Contents, bookmarks and highlights">☰</button>
+      <button class="icon" id="rMarkBtn" aria-label="Bookmark this page" title="Bookmark this page"><svg class="ic" aria-hidden="true"><use href="#i-bookmark"/></svg></button>
+      <button class="icon" id="rTocBtn" aria-label="Contents, bookmarks and highlights"><svg class="ic" aria-hidden="true"><use href="#i-list"/></svg></button>
       <button class="icon" id="rSetBtn" aria-label="Display settings">Aa</button>
     </header>
     <div id="rFrame" class="r-frame">
@@ -181,7 +203,7 @@
     <div id="rToc" class="sheet" hidden>
       <div class="sheet-head">
         <div class="tabs" id="rTabs"><button data-tab="toc" class="on">Contents</button><button data-tab="bookmarks">Bookmarks</button><button data-tab="highlights">Highlights</button></div>
-        <button class="icon" data-close="rToc">✕</button>
+        <button class="icon" data-close="rToc" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
       <ol id="rTocList" class="toc"></ol>
       <ol id="rMarkList" class="toc marks" hidden></ol>
@@ -189,7 +211,7 @@
 
     <!-- Display settings -->
     <div id="rSettings" class="sheet settings" hidden>
-      <div class="sheet-head"><b>Display</b><button class="icon" data-close="rSettings">✕</button></div>
+      <div class="sheet-head"><b>Display</b><button class="icon" data-close="rSettings" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div>
       <div class="set-row"><span>Theme</span>
         <div class="seg" data-set="theme">
           <button data-v="light" class="sw light">Aa</button><button data-v="sepia" class="sw sepia">Aa</button>
