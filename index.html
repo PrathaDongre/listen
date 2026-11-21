@@ -86,7 +86,12 @@
   </header>
 
   <div id="stage">
-    <div id="textView" class="text-view"></div>
+    <div id="textView" class="text-view paged"></div>
+    <div id="pgBar" class="pg-bar" hidden>
+      <button id="pgPrev" class="pg-btn" aria-label="Previous page">‹</button>
+      <span id="pgNum" class="pg-num"></span>
+      <button id="pgNext" class="pg-btn" aria-label="Next page">›</button>
+    </div>
     <div id="rsvpView" class="rsvp" hidden>
       <div class="sr-bar">
         <div id="srMode" class="seg sr-mode" role="group" aria-label="Speed reader follows">

@@ -363,7 +363,8 @@ $('toReader').onclick = () => { Hooks.jumpFromPlayer(); location.hash = `#/read/
 
 function renderText(data, loading, startAt) {
   const view = $('textView');
-  view.innerHTML = '';
+  view.innerHTML = '<div class="tv-flow"></div>';
+  PG.w = 0; PG.cur = 0;
   words = []; cur = -1;
   $('noText').hidden = !!data || loading;
   if (!data && !loading) cover($('noTextCover'), book);
@@ -386,7 +387,7 @@ function renderText(data, loading, startAt) {
     if (words[i].s == null) words[i].s = i ? words[i - 1].e ?? words[i - 1].s : 0;
     if (words[i].e == null) words[i].e = words[i].s;
   }
-  view.appendChild(frag);
+  view.firstChild.appendChild(frag);
   prepareSpeedReading();
   if (startAt != null && words.length) cur = Math.min(words.length - 1, Math.max(0, Math.round(startAt)));
   else if (words.length && pendingStart) cur = Math.max(0, wordAt(pendingStart + 0.02));
@@ -413,13 +414,81 @@ function highlight(i, jump) {
   }
   if (i < 0) return;
   if (rsvpOn()) showRsvp(i);
-  else {
-    const view = $('textView'), el = words[i].el;
-    const top = el.offsetTop - view.offsetTop, h = view.clientHeight;
-    if (jump || top < view.scrollTop + h * 0.15 || top > view.scrollTop + h * 0.7)
-      view.scrollTo({ top: top - h * 0.35, behavior: jump ? 'auto' : 'smooth' });
-  }
+  else followPage(i, jump);
 }
+
+/* ---------------- the text as pages
+ * The chapter is laid out in book-like pages (two side by side on a wide screen). The highlight
+ * moves along the words on the page, and when the voice reaches the next page, it slides on to it.
+ * Swipe (or use the arrows under the text) to look at other pages; after 10 s it follows the voice again. */
+const PG = { cur: 0, total: 1, w: 0, h: 0, n: 1, colW: 0, gap: 0, pad: 0, manual: 0 };
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function layoutPages(force) {
+  const v = $('textView'), flow = v.firstChild;
+  if (v.hidden || !flow || !words.length) return false;
+  const W = v.clientWidth, H = v.clientHeight;
+  if (!W || !H) return false;
+  if (!force && W === PG.w && H === PG.h) return true;
+  PG.w = W; PG.h = H;
+  PG.n = W >= 900 ? 2 : 1;
+  PG.pad = W < 520 ? 22 : 40;
+  PG.gap = PG.pad * 2;
+  PG.colW = (W - 2 * PG.pad - (PG.n - 1) * PG.gap) / PG.n;
+  Object.assign(flow.style, { height: H + 'px', columnWidth: PG.colW + 'px', columnGap: PG.gap + 'px', padding: `22px ${PG.pad}px 34px` });
+  PG.total = pageOf(words[words.length - 1].el) + 1;
+  setPage(Math.min(PG.cur, PG.total - 1));
+  return true;
+}
+function pageOf(el) {
+  const col = Math.floor((el.offsetLeft - PG.pad + PG.gap / 2) / (PG.colW + PG.gap));
+  return Math.max(0, Math.floor(col / PG.n));
+}
+function setPage(k) {
+  PG.cur = Math.max(0, Math.min(PG.total - 1, k));
+  const v = $('textView');
+  v.scrollLeft = 0; v.scrollTop = 0;                   // nothing else may shift the pages sideways
+  v.firstChild.style.transform = `translateX(${-PG.cur * PG.w}px)`;
+  $('pgNum').textContent = `${PG.cur + 1} / ${PG.total}`;
+  $('pgPrev').disabled = PG.cur === 0; $('pgNext').disabled = PG.cur >= PG.total - 1;
+}
+function followPage(i, jump) {
+  if (!layoutPages()) return;
+  const k = pageOf(words[i].el);
+  if (k === PG.cur || (!jump && Date.now() - PG.manual < 10000)) return;
+  if (jump) PG.manual = 0;
+  turnTo(k, !jump);
+}
+/* A quick slide to the next (or previous) page. */
+function turnTo(k, animate) {
+  k = Math.max(0, Math.min(PG.total - 1, k));
+  if (k === PG.cur) return;
+  const flow = $('textView').firstChild;
+  const slide = animate && !reduceMotion.matches && Math.abs(k - PG.cur) === 1 && !document.hidden;
+  flow.style.transition = slide ? 'transform .22s cubic-bezier(.25,.8,.3,1)' : 'none';
+  setPage(k);
+  if (slide) setTimeout(() => { flow.style.transition = 'none'; }, 260);
+}
+function browse(d) { PG.manual = Date.now(); turnTo(PG.cur + d, true); }
+$('pgPrev').onclick = () => browse(-1);
+$('pgNext').onclick = () => browse(1);
+{
+  let t0 = null;
+  $('textView').addEventListener('touchstart', e => { t0 = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
+  $('textView').addEventListener('touchend', e => {
+    const t = e.changedTouches[0];
+    if (!t0 || !t || String(getSelection()).trim()) return;
+    const dx = t.clientX - t0.x, dy = t.clientY - t0.y;
+    t0 = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy)) browse(dx < 0 ? 1 : -1);
+  });
+  let wheel = 0;
+  $('textView').addEventListener('wheel', e => {     // trackpad: a sideways swipe turns the page
+    if (Math.abs(e.deltaX) < Math.abs(e.deltaY) || Math.abs(e.deltaX) < 25 || Date.now() - wheel < 700) return;
+    wheel = Date.now(); browse(e.deltaX > 0 ? 1 : -1);
+  }, { passive: true });
+}
+addEventListener('resize', () => { if (!$('textView').hidden && words.length && layoutPages(true) && cur >= 0) { PG.manual = 0; setPage(pageOf(words[cur].el)); } });
+document.fonts?.ready.then(() => { if (words.length && layoutPages(true) && cur >= 0) setPage(pageOf(words[cur].el)); });
 
 /* Speed reader: one word at a time with its focus letter fixed in the middle. */
 function pivot(word) {
@@ -649,6 +718,7 @@ $('seek').onchange = () => { seeking = false; silent() ? goToWord(Math.round(+$(
 $('textView').onclick = e => {
   const w = e.target.closest('.w');
   if (!w || String(getSelection()).trim()) return;      // selecting text, not tapping a word
+  PG.manual = 0;                                       // tapped a word on this page: follow from here
   audio.currentTime = words[+w.dataset.i].s;
   if (audio.paused) audio.play().catch(() => {});
 };
@@ -690,6 +760,9 @@ const rsvpOn = () => words.length > 0 && ($('rsvpToggle').checked || textOnly(bo
 function applyMode() {
   $('rsvpView').hidden = !rsvpOn();
   $('textView').hidden = rsvpOn() || !words.length;
+  $('pgBar').hidden = $('textView').hidden;
+  PG.w = 0;                                            // re-measure the pages when the text shows again
+  if (!$('textView').hidden) layoutPages(true);
   SR.on = silent();
   const canSilent = rsvpOn() && !textOnly(book);
   $('srMode').hidden = !canSilent;
@@ -816,6 +889,27 @@ function styleContents(contents) {
   st.textContent = readerCss();
 }
 
+/* Remove anything in a book's chapter that could run code: <script>, inline on… handlers,
+ * javascript: links, embedded frames/objects and meta refreshes. */
+function stripScripts(output, section) {
+  let out = output;
+  try {
+    const doc = new DOMParser().parseFromString(output, 'application/xhtml+xml');
+    if (doc.querySelector('parsererror')) throw new Error('not XHTML');
+    doc.querySelectorAll('script, iframe, frame, object, embed, applet, meta[http-equiv]').forEach(n => n.remove());
+    for (const el of doc.querySelectorAll('*')) for (const a of [...el.attributes]) {
+      if (/^on/i.test(a.name) || /^\s*(javascript|vbscript|data:text\/html)/i.test(a.value) && /^(href|src|xlink:href|action|formaction)$/i.test(a.name)) el.removeAttribute(a.name);
+    }
+    out = new XMLSerializer().serializeToString(doc);
+  } catch {
+    out = output.replace(/<script\b[\s\S]*?<\/script\s*>|<script\b[^>]*\/>/gi, '')
+      .replace(/<(iframe|frame|object|embed|applet)\b[\s\S]*?(<\/\1\s*>|\/>)/gi, '')
+      .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .replace(/(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"');
+  }
+  section.output = out;
+}
+
 async function openReader(b) {
   if (!b || !b.epub) return (location.hash = b ? `#/book/${enc(b.id)}` : '#/');
   show('reader');
@@ -830,16 +924,22 @@ async function openReader(b) {
     const data = await Source.epub(b);
     if (R.id !== b.id) return;
     R.epub = ePub(data);
+    R.epub.spine.hooks.serialize.register(stripScripts);
     const s = rset();
-    R.rendition = R.epub.renderTo('rStage', { width: '100%', height: '100%', flow: s.flow, allowScriptedContent: false,
+    // Safari only delivers taps and text selection inside the page if the frame may run scripts,
+    // so it may; every chapter has its own scripts stripped first (stripScripts), so only this app's code runs.
+    R.rendition = R.epub.renderTo('rStage', { width: '100%', height: '100%', flow: s.flow, allowScriptedContent: true,
       spread: s.columns === 'one' || s.flow !== 'paginated' ? 'none' : 'auto', minSpreadWidth: 800 });
     R.rendition.hooks.content.register(styleContents);
     R.rendition.on('relocated', onRelocated);
     R.rendition.on('click', readerTap);                // taps and swipes are read inside the page itself,
     R.rendition.on('touchstart', readerTouchStart);    // so pressing and dragging can still select text
     R.rendition.on('touchend', readerTouchEnd);
+    R.rendition.on('mousedown', readerPress);
     R.rendition.on('keyup', readerKeys);
-    R.rendition.on('selected', (cfi, contents) => Hooks.selected(cfi, contents));
+    R.rendition.on('selected', (cfi, contents) => {   // a word the browser selects on a quick tap isn't you selecting
+      if (Date.now() - lastTouchTap > 900) Hooks.selected(cfi, contents);
+    });
     await R.rendition.display(Store.cfi(b.id) || undefined);
     R.ready = true;
     Store.setLast(b.id);
@@ -940,8 +1040,10 @@ function readerKeys(e) {
 document.addEventListener('keyup', e => { if (!e.target.matches?.('input, select')) readerKeys(e); });
 function toggleImmersive() { $('reader').classList.toggle('immersive'); $('rToc').hidden = true; $('rSettings').hidden = true; }
 /* Tap the left 30% to go back, the right 30% to go forward, the middle for the menus; swipe to turn.
- * A tap only counts if no text got selected (press-and-hold, double-click or drag selects instead). */
-let touch = null, lastSwipe = 0, tapTimer = 0;
+ * What counts is how you touched, not whether text ended up selected: a quick tap is a tap (even if the
+ * browser selects the word under it, as Chrome's "Touch to Search" on Android does), while a press-and-hold,
+ * a drag or a double-click selects text. With the highlight bar open, a tap closes it (and an edge tap still turns). */
+let touch = null, press = null, lastSwipe = 0, tapTimer = 0, lastTouchTap = 0;
 const selectedIn = contents => !!String(contents?.window?.getSelection?.() || '').trim();
 function tapSpot(e, contents) {                       // where across the page the tap was, 0 (left) to 1 (right)
   const frame = $('rFrame'), el = contents.document.defaultView.frameElement;
@@ -950,24 +1052,43 @@ function tapSpot(e, contents) {                       // where across the page t
   for (let o = el; o && o !== frame && frame.contains(o); o = o.offsetParent) x += o.offsetLeft;
   return x / (frame.clientWidth || 1);
 }
+function readerPress(e) { press = { x: e.clientX, y: e.clientY, at: Date.now() }; }
 function readerTap(e, contents) {
-  if (e.target?.closest?.('a[href]') || selectedIn(contents) || Date.now() - lastSwipe < 500) return;
-  const spot = tapSpot(e, contents);
+  if (e.type === 'click' && Date.now() - lastTouchTap < 700) return;     // already handled as a touch
+  if (e.target?.closest?.('a[href]') || Date.now() - lastSwipe < 500) return;
+  if (e.type === 'click') {
+    const p = press; press = null;
+    if (e.detail >= 2) { clearTimeout(tapTimer); return; }              // double-click: selecting a word
+    if (p && (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8 || Date.now() - p.at > 500)) return;   // a drag or hold: selecting
+  }
+  const spot = tapSpot(e, contents), barOpen = !!$('ssSel') && !$('ssSel').hidden;
   clearTimeout(tapTimer);
   tapTimer = setTimeout(() => {                       // wait a moment: a double-click selects a word instead
-    if (selectedIn(contents)) return;
-    if (rset().flow !== 'paginated') return toggleImmersive();
+    const paged = rset().flow === 'paginated', edge = paged && (spot < 0.3 || spot > 0.7);
+    if (barOpen) {                                    // first, put away the selection and its bar
+      window.hideSelBar?.();
+      try { contents.window.getSelection().removeAllRanges(); } catch {}
+      if (!edge) return;
+    }
+    if (!paged) return toggleImmersive();
     spot < 0.3 ? go(-1) : spot > 0.7 ? go(1) : toggleImmersive();
-  }, 250);
+  }, e.type === 'click' ? 260 : 0);
 }
-function readerTouchStart(e) { const t = e.changedTouches[0]; touch = t && { x: t.clientX, y: t.clientY, at: Date.now() }; }
+function readerTouchStart(e) {
+  const t = e.changedTouches[0];
+  lastTouchTap = 0;                                    // a new touch: whatever it selects is up to this touch
+  touch = t && { x: t.clientX, y: t.clientY, at: Date.now() };
+}
 function readerTouchEnd(e, contents) {
   const t = e.changedTouches[0], s = touch;
   touch = null;
-  if (!s || !t || selectedIn(contents) || rset().flow !== 'paginated') return;
+  if (!s || !t || e.touches?.length) return;
   const dx = t.clientX - s.x, dy = t.clientY - s.y;     // measured inside the page, so already in the book's direction
-  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - s.at < 800) {
+  if (rset().flow === 'paginated' && Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - s.at < 800 && !selectedIn(contents)) {
     lastSwipe = Date.now(); clearTimeout(tapTimer); go(dx < 0 ? 1 : -1);
+  } else if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && Date.now() - s.at < 400) {
+    lastTouchTap = Date.now();                        // phones don't always send a "click" for a tap on text
+    readerTap({ type: 'touch', target: e.target, clientX: t.clientX, clientY: t.clientY }, contents);
   }
 }
 $('rBack').onclick = () => { location.hash = `#/book/${enc(R.id || '')}`; };

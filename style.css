@@ -306,3 +306,15 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .busy::before { animation-duration: 3s; } .spinner { animation-duration: 2.4s; } }
+
+/* Player text as pages, with a page turn */
+.text-view.paged { overflow: hidden; overflow: clip; padding: 0; position: relative; background: var(--bg); }
+.text-view.paged .tv-flow { column-fill: auto; will-change: transform; }
+.text-view.paged .tv-flow > :first-child { margin-top: 0; }
+.text-view.paged h3 { break-after: avoid; }
+.pg-bar { position: absolute; left: 0; right: 0; bottom: 2px; display: flex; justify-content: center; align-items: center; gap: 6px; z-index: 4; pointer-events: none; }
+.pg-bar > * { pointer-events: auto; }
+.pg-num { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 54px; text-align: center; }
+.pg-btn { width: 30px; height: 26px; border-radius: 13px; font-size: 18px; color: var(--muted); }
+.pg-btn:hover:not(:disabled) { background: var(--line); }
+.pg-btn:disabled { opacity: .25; cursor: default; }
