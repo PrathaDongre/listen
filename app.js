@@ -310,7 +310,7 @@ async function showPlayer(b, n) {
   $('toReader').hidden = !b.epub;
   const p = Store.pos(b.id);
   pendingStart = p && p.n === ch.n ? p.t : 0;
-  $('rsvpToggle').checked = textOnly(b) || !!Store.data.rsvp;
+  $('rsvpToggle').checked = !!Store.data.rsvp;
   renderText(null, true);
   showStat();
   let url, data;
@@ -364,11 +364,12 @@ $('toReader').onclick = () => { Hooks.jumpFromPlayer(); location.hash = `#/read/
 function renderText(data, loading, startAt) {
   const view = $('textView');
   view.innerHTML = '<div class="tv-flow"></div>';
+  sentA = sentB = -1;
   PG.w = 0; PG.cur = 0;
   words = []; cur = -1;
   $('noText').hidden = !!data || loading;
   if (!data && !loading) cover($('noTextCover'), book);
-  $('rsvpToggle').disabled = !data || textOnly(book);
+  $('rsvpToggle').disabled = !data;
   if (!data) return applyMode();
   const frag = document.createDocumentFragment();
   for (const para of data.paras) {
@@ -414,7 +415,18 @@ function highlight(i, jump) {
   }
   if (i < 0) return;
   if (rsvpOn()) showRsvp(i);
-  else followPage(i, jump);
+  else { followPage(i, jump); markWord(i); }
+}
+
+/* ---------------- the sentence being read stands out; the rest of the page is faded and the word itself is in colour */
+let sentA = -1, sentB = -1;
+function markWord(i) {
+  let a = i; while (a > 0 && !words[a].ps && !SENT_END.test(words[a - 1].text)) a--;
+  let b = i; while (b < words.length - 1 && !SENT_END.test(words[b].text) && !words[b + 1].ps) b++;
+  if (a === sentA && b === sentB) return;
+  for (let k = sentA; k >= 0 && k <= sentB && k < words.length; k++) words[k].el.classList.remove('sent');
+  for (let k = a; k <= b; k++) words[k].el.classList.add('sent');
+  sentA = a; sentB = b;
 }
 
 /* ---------------- the text as pages
@@ -519,7 +531,9 @@ const SR_DEF = { mode: 'audio', wpm: 300, warm: true, group: true };
 const srs = () => ({ ...SR_DEF, ...(Store.data.sr || {}) });
 const setSr = o => { Store.data.sr = { ...srs(), ...o }; Store.save(); };
 const wpm = () => srs().wpm;
-const silent = () => rsvpOn() && (textOnly(book) || srs().mode === 'silent');
+// A book without audio always runs on the silent clock, in the speed reader or on the page;
+// a book with audio runs silently only in the speed reader's Silent mode.
+const silent = () => words.length > 0 && (textOnly(book) || (rsvpOn() && srs().mode === 'silent'));
 const SENT_END = /[.!?…]["'’”)\]]*$/u, CLAUSE_END = /[,;:—–]["'’”)\]]*$/u;
 const core = t => t.replace(/[^\p{L}\p{N}]/gu, '');
 
@@ -545,7 +559,7 @@ function prepareSpeedReading() {
     k = e;
   }
 }
-const groupOf = i => srs().group && words[i]?.g != null ? [words[i].g, words[i].ge] : [i, i + 1];
+const groupOf = i => srs().group && rsvpOn() && words[i]?.g != null ? [words[i].g, words[i].ge] : [i, i + 1];   // pairs only in the speed reader
 
 function warmFactor(start) {                           // ease in: 75% of your speed, rising to 100% over 20 s
   if (!start || !srs().warm) return 1;
@@ -719,6 +733,7 @@ $('textView').onclick = e => {
   const w = e.target.closest('.w');
   if (!w || String(getSelection()).trim()) return;      // selecting text, not tapping a word
   PG.manual = 0;                                       // tapped a word on this page: follow from here
+  if (silent()) { goToWord(+w.dataset.i); if (!SR.playing) startSilent(); return; }
   audio.currentTime = words[+w.dataset.i].s;
   if (audio.paused) audio.play().catch(() => {});
 };
@@ -756,7 +771,7 @@ $('slower').onclick = () => silent() ? setWpm(wpm() - 25) : setRate(rate() - 0.1
 $('faster').onclick = () => silent() ? setWpm(wpm() + 25) : setRate(rate() + 0.1);
 $('speedVal').onclick = () => silent() ? setWpm(300) : setRate(1);
 
-const rsvpOn = () => words.length > 0 && ($('rsvpToggle').checked || textOnly(book));
+const rsvpOn = () => words.length > 0 && $('rsvpToggle').checked;
 function applyMode() {
   $('rsvpView').hidden = !rsvpOn();
   $('textView').hidden = rsvpOn() || !words.length;
@@ -779,7 +794,7 @@ function handover(change) {
   if (wasSilent) stopSilent();                          // parks the audio on the current word
   else if (words.length) highlight(Math.max(0, wordAt(audio.currentTime + 0.02)), true);
   change();
-  if (wasSilent === silent()) return applyMode();
+  if (wasSilent === silent()) { applyMode(); if (wasSilent && was) startSilent(); return; }   // e.g. a book without audio: page ⇄ speed reader
   if (!wasSilent) audio.pause();
   SR.lastStop = audioStopped = Date.now();              // a switch isn't a fresh start: no warm-up
   applyMode();

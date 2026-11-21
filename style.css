@@ -309,7 +309,7 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 
 /* Player text as pages, with a page turn */
 .text-view.paged { overflow: hidden; overflow: clip; padding: 0; position: relative; background: var(--bg); }
-.text-view.paged .tv-flow { column-fill: auto; will-change: transform; }
+.text-view.paged .tv-flow { position: relative; column-fill: auto; will-change: transform; }
 .text-view.paged .tv-flow > :first-child { margin-top: 0; }
 .text-view.paged h3 { break-after: avoid; }
 .pg-bar { position: absolute; left: 0; right: 0; bottom: 2px; display: flex; justify-content: center; align-items: center; gap: 6px; z-index: 4; pointer-events: none; }
@@ -318,3 +318,8 @@ button { background: none; border: 0; cursor: pointer; padding: 0; }
 .pg-btn { width: 30px; height: 26px; border-radius: 13px; font-size: 18px; color: var(--muted); }
 .pg-btn:hover:not(:disabled) { background: var(--line); }
 .pg-btn:disabled { opacity: .25; cursor: default; }
+
+/* The word being read: its sentence stands out, the rest of the page is faded, the word itself in colour */
+.text-view.hl-sentence .w { color: color-mix(in srgb, var(--text) 40%, var(--bg)); transition: color .3s; }
+.text-view.hl-sentence .w.sent { color: var(--text); }
+.text-view.hl-sentence .w.now { background: none; color: var(--accent); text-decoration: underline 2px; text-underline-offset: 5px; }
