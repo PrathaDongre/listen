@@ -137,6 +137,96 @@ const hasAudio = b => b.chapters.length > 0;
 const textOnly = b => !!b && !hasAudio(b) && (b.text || []).length > 0;
 const chaptersOf = b => hasAudio(b) ? b.chapters : (b.text || []);
 
+/* ---------------- a theme from the book's cover
+ * The cover is shrunk to a few hundred pixels; the strongest colour that covers a good share of it becomes
+ * the accent, and the page backgrounds get a faint wash of the same hue. Every pair that carries text is
+ * checked for contrast (4.5:1) and nudged lighter or darker until it passes, in light and dark mode. */
+const themeCache = {};
+const darkMode = matchMedia('(prefers-color-scheme: dark)');
+let themeFor = null;
+function hslToRgb(h, s, l) {
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [f(0), f(8), f(4)];
+}
+function rgbToHsl(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+const lum = ([r, g, b]) => [r, g, b].map(c => c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((a, c, i) => a + c * [.2126, .7152, .0722][i], 0);
+const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+const css = ([h, s, l]) => `hsl(${h.toFixed(1)} ${(s * 100).toFixed(1)}% ${(l * 100).toFixed(1)}%)`;
+/* move lightness (up or down) until the colour reads against every background given */
+function readable(h, s, l, against, dir, min = 4.5) {
+  for (let k = 0; k < 60; k++) {
+    const rgb = hslToRgb(h, s, l);
+    if (against.every(bg => contrast(rgb, bg) >= min)) break;
+    l = Math.max(0, Math.min(1, l + dir * 0.01));
+  }
+  return [h, s, l];
+}
+async function coverHue(b) {
+  if (themeCache[b.id] !== undefined) return themeCache[b.id];
+  let out = null;
+  try {
+    const url = await Source.coverUrl(b);
+    if (url) {
+      const img = new Image(); img.src = url; await img.decode();
+      const W = 30, H = 45, c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
+      const d = g.getImageData(0, 0, W, H).data, bins = Array.from({ length: 36 }, () => ({ w: 0, x: 0, y: 0, s: 0 }));
+      let grey = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const [h, s, l] = rgbToHsl(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255);
+        if (s < 0.22 || l < 0.12 || l > 0.92) { grey++; continue; }
+        const w = s * s * (1 - Math.abs(l - 0.5)), bin = bins[Math.floor(h / 10) % 36];
+        bin.w += w; bin.x += Math.cos(h * Math.PI / 180) * w; bin.y += Math.sin(h * Math.PI / 180) * w; bin.s += s * w;
+      }
+      let best = -1, bw = 0;
+      bins.forEach((_, k) => { const w = bins[(k + 35) % 36].w * .5 + bins[k].w + bins[(k + 1) % 36].w * .5; if (w > bw) { bw = w; best = k; } });
+      if (best >= 0 && bw > 0.6) {
+        const grp = [bins[(best + 35) % 36], bins[best], bins[(best + 1) % 36]];
+        const x = grp.reduce((a, q) => a + q.x, 0), y = grp.reduce((a, q) => a + q.y, 0), w = grp.reduce((a, q) => a + q.w, 0);
+        out = { h: (Math.atan2(y, x) * 180 / Math.PI + 360) % 360, s: Math.min(0.85, grp.reduce((a, q) => a + q.s, 0) / w) };
+      } else out = { h: 30, s: 0.08 };        // a black-and-white cover: a warm grey
+    }
+  } catch (e) { console.warn('cover colours', e); }
+  return (themeCache[b.id] = out);
+}
+function themeVars({ h, s }, dark) {
+  const tint = Math.min(s, 0.6);
+  const bg = dark ? [h, tint * 0.28, 0.11] : [h, tint * 0.45, 0.955];
+  const panel = dark ? [h, tint * 0.26, 0.145] : [h, tint * 0.5, 0.98];
+  const raised = dark ? [h, tint * 0.24, 0.175] : [h, tint * 0.35, 0.99];
+  const line = dark ? [h, tint * 0.2, 0.25] : [h, tint * 0.35, 0.86];
+  const bgs = [bg, panel, raised].map(c => hslToRgb(...c));
+  const text = readable(h, tint * 0.3, dark ? 0.92 : 0.14, bgs, dark ? 1 : -1, 10);
+  const muted = readable(h, tint * 0.3, dark ? 0.62 : 0.42, bgs, dark ? 1 : -1);
+  const accS = Math.max(0.45, Math.min(0.8, s));
+  // the accent colours the current word on the page and fills buttons (with white or dark text on it)
+  const accent = dark ? readable(h, accS, 0.66, bgs, 1) : readable(...readable(h, accS, 0.46, bgs, -1), [[1, 1, 1]], -1);
+  const accentText = dark ? '#16120f' : '#ffffff';
+  const hl = dark ? [h, Math.min(0.55, s), 0.3] : [h, Math.min(0.9, s + 0.1), 0.84];
+  return { '--bg': css(bg), '--panel': css(panel), '--raised': css(raised), '--line': css(line), '--text': css(text),
+    '--muted': css(muted), '--accent': css(accent), '--accent-text': accentText, '--hl': css(hl), '--pivot': css(accent),
+    '--read': css(readable(h, tint * 0.2, dark ? 0.5 : 0.58, [bgs[0]], dark ? 1 : -1, 2.5)) };
+}
+const THEME_KEYS = ['--bg', '--panel', '--raised', '--line', '--text', '--muted', '--accent', '--accent-text', '--hl', '--pivot', '--read'];
+async function bookTheme(b) {
+  themeFor = b?.id || null;
+  const root = document.documentElement.style, meta = [...document.querySelectorAll('meta[name="theme-color"]')];
+  if (!b) { THEME_KEYS.forEach(k => root.removeProperty(k)); meta.forEach(m => m.content = m.media.includes('dark') ? '#151417' : '#f6f3ec'); return; }
+  const hue = await coverHue(b);
+  if (themeFor !== b.id || !hue) return;
+  const v = themeVars(hue, darkMode.matches);
+  for (const k of THEME_KEYS) root.setProperty(k, v[k]);
+  meta.forEach(m => m.content = v['--bg']);               // the phone's browser bar matches too
+}
+darkMode.addEventListener('change', () => { if (themeFor) bookTheme(findBook(themeFor)); });
+
 async function cover(el, b) {
   el.innerHTML = '';
   const h = hue(b.title);
@@ -207,6 +297,7 @@ async function route() {
   render(view, id, n);
 }
 function render(view, id, n) {
+  if (view === 'book' || view === 'play') bookTheme(findBook(id)); else bookTheme(null);
   if (view !== 'read') closeReader();
   if (view !== 'play' && SR.playing) stopSilent();     // silent reading only runs while you're looking at it
   if (view === 'book') return showBook(findBook(id));
