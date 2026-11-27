@@ -126,7 +126,7 @@ const DriveSource = {
         return c;
       }).sort((a, b) => a.n - b.n);                   // by number: 100 comes after 99, not after 10
       if (!by['book.json']) return null;              // not a book folder (e.g. voice samples)
-      return { id: s.name, title: meta.title || s.name, author: meta.author || '', voice: meta.voice || '', speed: meta.speed,
+      return { id: s.name, title: meta.title || s.name, author: meta.author || '', voice: meta.voice || '', speed: meta.speed, genre: meta.genre || '',
                added: Date.parse(s.createdTime) || 0, total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by,
                text: by['text.json'] ? meta.text || [] : [] };
     }));
@@ -341,12 +341,27 @@ const LIB_FILTERS = { all: 'All books', audio: 'Audiobooks', speed: 'Speed readi
 const libPrefs = () => ({ sort: 'recent', filter: 'all', ...(Store.data.lib || {}) });
 const lastOpened = b => Math.max(Store.pos(b.id)?.at || 0, Store.data.cfi?.[b.id]?.at || 0);
 const readPct = b => Store.data.cfi?.[b.id]?.pct || 0;
-const isDone = b => Math.max(bookProgress(b), readPct(b)) >= 0.985;      // finished listening, speed reading or reading
+const reachedEnd = b => Math.max(bookProgress(b), readPct(b)) >= 0.985;
+/* Your say-so first; otherwise once a book is finished it stays finished, even if you go back to an earlier chapter. */
+const isDone = b => Store.data.marked?.[b.id]?.done ?? (!!Store.data.finished?.[b.id] || reachedEnd(b));
+function setDone(b, done) {                            // "Mark as finished" / "Not finished" on the book's page
+  (Store.data.marked ||= {})[b.id] = { done, at: Date.now() };
+  if (done) (Store.data.finished ||= {})[b.id] ||= Date.now();
+  else if (Store.data.finished) delete Store.data.finished[b.id];
+  Store.save();
+}
 /* When you finished each book (kept even if you start it again), for the stats page. */
 function noteFinished(b) {
-  if (!b || Store.data.finished?.[b.id] || !isDone(b)) return;
-  (Store.data.finished ||= {})[b.id] = Date.now(); Store.save();
+  if (!b || Store.data.finished?.[b.id] || !reachedEnd(b)) return;
+  const m = Store.data.marked?.[b.id];
+  if (m && !m.done && lastOpened(b) <= m.at + 60e3) return;   // you said "not finished" and haven't moved on since
+  (Store.data.finished ||= {})[b.id] = Date.now();
+  if (m && !m.done) delete Store.data.marked[b.id];
+  Store.save();
 }
+/* Genre: what you picked (synced), else the one in the book's details on Drive. */
+const genreOf = b => Store.data.genres?.[b.id]?.g || b.genre || 'Other';
+function setGenre(b, g) { (Store.data.genres ||= {})[b.id] = { g, at: Date.now() }; Store.save(); }
 function libraryBooks({ sort, filter }) {
   const keep = { all: () => true, audio: hasAudio, speed: textOnly, done: isDone }[filter] || (() => true);
   const byTitle = (a, b) => a.title.localeCompare(b.title);
@@ -354,6 +369,7 @@ function libraryBooks({ sort, filter }) {
     recent: (a, b) => lastOpened(b) - lastOpened(a) || byTitle(a, b),   // books you've never opened go last, A–Z
     added: (a, b) => (b.added || 0) - (a.added || 0) || byTitle(a, b),
     title: byTitle,
+    genre: (a, b) => genreOf(a).localeCompare(genreOf(b)) || (genreOf(a) === 'Other') - (genreOf(b) === 'Other') || byTitle(a, b),
   }[sort] || byTitle;
   return books.filter(keep).sort(order);
 }
@@ -387,7 +403,15 @@ function showLibrary() {
     cover(hero.firstChild, last);
     hero.onclick = () => location.hash = ch ? `#/play/${enc(last.id)}/${ch.n}` : `#/read/${enc(last.id)}`;
   }
+  let group = null;
   for (const b of shown) {
+    if (lib.sort === 'genre' && genreOf(b) !== group) {
+      group = genreOf(b);
+      const h = document.createElement('h3');
+      h.className = 'shelf-group';
+      h.innerHTML = `${esc(group)} <span>${shown.filter(x => genreOf(x) === group).length}</span>`;
+      shelf.appendChild(h);
+    }
     const card = document.createElement('button');
     card.className = 'book-card';
     const rec = hasAudio(b) ? (b.chapters.length < b.total ? `<span class="pill on">${ic('headphones')} ${b.chapters.length}/${b.total}</span>` : `<span class="pill on">${ic('headphones')} Audio</span>`)
@@ -396,9 +420,60 @@ function showLibrary() {
       <span class="t">${esc(b.title)}</span><span class="a">${esc(b.author)}</span>
       <div class="tags">${rec}${b.epub ? `<span class="pill">${ic('book')} EPUB</span>` : ''}</div>`;
     cover(card.firstChild.firstChild, b);
-    card.onclick = () => location.hash = `#/book/${enc(b.id)}`;
+    card.onclick = () => { if (!justHeld()) location.hash = `#/book/${enc(b.id)}`; };
+    onHold(card, () => bookMenu(b));
     shelf.appendChild(card);
   }
+}
+
+/* ---------------- press and hold (or right-click) a book for options */
+let heldAt = 0;                                          // when a hold last opened a menu, so the click / context menu that follows it is ignored
+const justHeld = () => Date.now() - heldAt < 800;
+function onHold(el, fn) {
+  let timer, x, y;
+  const cancel = () => clearTimeout(timer);
+  el.addEventListener('pointerdown', e => {
+    if (e.button) return;
+    x = e.clientX; y = e.clientY;
+    timer = setTimeout(() => { heldAt = Date.now(); navigator.vibrate?.(10); fn(); }, 500);
+  });
+  el.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - x, e.clientY - y) > 10) cancel(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, cancel);
+  el.addEventListener('contextmenu', e => { e.preventDefault(); cancel(); if (!justHeld()) fn(); });
+}
+function actionSheet(title, items) {
+  document.querySelector('.act-sheet')?.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'act-sheet';
+  wrap.innerHTML = `<div class="act-box" role="menu"><div class="act-title">${title}</div>
+    ${items.map((it, i) => `<button role="menuitem" data-i="${i}" class="${it.on ? 'on' : ''}">${it.icon ? ic(it.icon) : ''}<span>${esc(it.label)}</span></button>`).join('')}
+    <button class="act-cancel" data-i="-1">Cancel</button></div>`;
+  const close = () => wrap.remove();
+  wrap.onclick = e => {
+    const btn = e.target.closest('[data-i]');
+    if (!btn && e.target.closest('.act-box')) return;
+    close();
+    if (btn && btn.dataset.i >= 0) items[btn.dataset.i].run();
+  };
+  addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); removeEventListener('keydown', esc); } });
+  document.body.appendChild(wrap);
+  wrap.querySelector('button').focus({ preventScroll: true });
+}
+function bookMenu(b) {
+  const d = isDone(b);
+  actionSheet(`<b>${esc(b.title)}</b><span>${esc(b.author)}</span>`, [
+    d ? { icon: 'ccw', label: 'Mark as not finished', run: () => { setDone(b, false); toast('Marked as not finished'); showLibrary(); } }
+      : { icon: 'check', label: 'Mark as finished', run: () => { setDone(b, true); toast('Marked as finished'); showLibrary(); } },
+    { icon: 'list', label: `Genre: ${genreOf(b)}`, run: () => genreMenu(b) },
+    { icon: 'book', label: 'Open book page', run: () => location.hash = `#/book/${enc(b.id)}` },
+  ]);
+}
+function genreMenu(b) {
+  const all = [...new Set(books.map(genreOf))].filter(g => g !== 'Other').sort();
+  actionSheet(`<b>Genre</b><span>${esc(b.title)}</span>`, [
+    ...all.map(g => ({ label: g, on: g === genreOf(b), run: () => { setGenre(b, g); showLibrary(); } })),
+    { label: 'New genre…', run: () => { const g = prompt('Genre', '')?.trim(); if (g) { setGenre(b, g); showLibrary(); } } },
+  ]);
 }
 
 /* ---------------- one book */
@@ -419,6 +494,13 @@ async function showBook(b) {
   $('listenBtn').onclick = () => location.hash = `#/play/${enc(b.id)}/${p ? p.n : chs[0].n}`;
   $('readBtn').hidden = !b.epub;
   $('readBtn').onclick = () => location.hash = `#/read/${enc(b.id)}`;
+  const drawDone = () => {
+    const d = isDone(b);
+    $('doneBtn').classList.toggle('on', d);
+    $('doneBtn').innerHTML = d ? `${ic('check')} Finished · <u>undo</u>` : `${ic('check')} Mark as finished`;
+  };
+  $('doneBtn').onclick = () => { const d = !isDone(b); setDone(b, d); drawDone(); toast(d ? 'Marked as finished' : 'Marked as not finished'); };
+  drawDone();
   $('chaptersTitle').hidden = !chs.length;
   $('noAudio').hidden = hasAudio(b);
   $('noAudio').textContent = textOnly(b) ? 'No audio recorded for this book yet — you can speed-read it or read the book.'

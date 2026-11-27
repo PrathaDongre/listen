@@ -65,7 +65,7 @@ const Sync = {
 function saveQuiet() { try { localStorage.setItem('listen', JSON.stringify(Store.data)); } catch {} }
 function payload() {
   const d = Store.data;
-  return { v: 1, pos: d.pos || {}, cfi: d.cfi || {}, last: d.last, lastAt: d.lastAt || 0, marks: d.marks || {}, stats: d.stats || {}, finished: d.finished || {}, goals: d.goals };
+  return { v: 1, pos: d.pos || {}, cfi: d.cfi || {}, last: d.last, lastAt: d.lastAt || 0, marks: d.marks || {}, stats: d.stats || {}, finished: d.finished || {}, goals: d.goals, marked: d.marked || {}, genres: d.genres || {} };
 }
 function mergeInto(local, remote) {
   const newer = (a, b) => (b?.at || 0) > (a?.at || 0);
@@ -80,6 +80,11 @@ function mergeInto(local, remote) {
   local.finished ||= {};
   for (const [id, t] of Object.entries(remote.finished || {})) if (!local.finished[id] || t < local.finished[id]) local.finished[id] = t;   // the first time you finished it
   if ((remote.goals?.at || 0) > (local.goals?.at || 0)) local.goals = remote.goals;
+  local.marked ||= {};
+  for (const [id, v] of Object.entries(remote.marked || {})) if (!local.marked[id] || newer(local.marked[id], v)) local.marked[id] = v;
+  for (const [id, v] of Object.entries(local.marked)) if (v.done === false && local.finished) delete local.finished[id];   // un-finished on another device
+  local.genres ||= {};
+  for (const [id, v] of Object.entries(remote.genres || {})) if (!local.genres[id] || newer(local.genres[id], v)) local.genres[id] = v;
   local.marks ||= {};
   for (const [bid, items] of Object.entries(remote.marks || {})) {
     const mine = (local.marks[bid] ||= {});

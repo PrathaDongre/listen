@@ -502,9 +502,35 @@ html, body, button, a, input, label, .controls, .text-view, .rsvp { touch-action
 .cal-legend .muted { margin-left: 6px; }
 
 /* Finished books: a badge on the cover */
-.cover-wrap { position: relative; }
+.cover-wrap { position: relative; width: 100%; }
 .book-card:hover .cover-wrap .cover { transform: translateY(-2px); }
 .done-badge { position: absolute; top: 7px; right: 7px; z-index: 2; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
   background: var(--accent); color: var(--accent-text); box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 2px 8px rgba(0,0,0,.35); }
 .done-badge .ic { font-size: 16px; stroke-width: 2.8; vertical-align: 0; }
 
+
+/* Book page: mark as finished */
+.done-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 13.5px; font-weight: 600; color: var(--muted);
+  padding: 5px 12px 5px 9px; border-radius: 999px; border: 1px solid var(--line); }
+.done-toggle .ic { font-size: 15px; stroke-width: 2.4; }
+.done-toggle.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.done-toggle u { font-weight: 400; text-underline-offset: 2px; }
+
+/* library: genre headings, press-and-hold menu */
+.shelf-group { grid-column: 1 / -1; margin: 10px 0 -10px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.shelf-group:first-child { margin-top: 0; }
+.shelf-group span { font-weight: 500; margin-left: 4px; opacity: .8; }
+.book-card { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.book-card img { -webkit-user-drag: none; pointer-events: none; }
+.act-sheet { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; animation: actFade .15s; }
+.act-box { width: min(420px, 100%); background: var(--panel); color: var(--text); border-radius: 18px 18px 0 0; padding: 14px 10px calc(10px + env(safe-area-inset-bottom));
+  max-height: 80vh; overflow: auto; box-shadow: 0 -8px 30px rgba(0,0,0,.2); }
+.act-title { padding: 2px 12px 10px; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.act-title span { color: var(--muted); font-size: 13px; }
+.act-box button { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 13px 12px; border-radius: 10px; font-size: 16px; color: inherit; }
+.act-box button:hover, .act-box button:focus-visible { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.act-box button.on { color: var(--accent); font-weight: 600; }
+.act-box button .ic { font-size: 19px; color: var(--muted); }
+.act-box .act-cancel { justify-content: center; margin-top: 4px; color: var(--muted); }
+@media (min-width: 700px) { .act-sheet { align-items: center; } .act-box { border-radius: 16px; } }
+@keyframes actFade { from { opacity: 0; } }
