@@ -9,7 +9,7 @@ const $ = id => document.getElementById(id);
 const audio = $('audio');
 const CFG = window.LISTEN_CONFIG || {};
 /* Extra features (sync, stats, bookmarks, look-up) live in features.js and plug in through these. */
-const Hooks = window.Hooks = { saved() {}, signedIn() {}, readerReady() {}, relocated() {}, selected() {}, jumpFromPlayer() {}, showStats() {} };
+const Hooks = window.Hooks = { saved() {}, signedIn() {}, readerReady() {}, relocated() {}, selected() {}, jumpFromPlayer() {}, showStats() {}, showNotebook() {}, libraryShown() {}, textRendered() {}, tapMark() { return false; } };
 
 /* ================================================================ saved settings & positions */
 const Store = {
@@ -40,7 +40,28 @@ const LocalSource = {
 
 const DriveSource = {
   name: 'drive',
-  token: null, expires: 0, client: null,
+  token: null, expires: 0, client: null, waiting: null,
+  /* Google gives a web app a 1-hour pass (no server, so no long-lived one). We keep it across app launches,
+   * and when it runs out we ask for one tap to renew it instead of sending you back to the sign-in page. */
+  restore() {
+    try { const t = JSON.parse(localStorage.getItem('listen-gtoken') || 'null'); if (t && t.expires > Date.now()) Object.assign(this, t); } catch {}
+    return !!this.token;
+  },
+  get known() { try { return !!localStorage.getItem('listen-signed-in'); } catch { return false; } },
+  ensureToken() {
+    if (this.token && Date.now() < this.expires) return Promise.resolve();
+    if (!this.waiting) this.waiting = new Promise(resolve => {
+      const bar = $('reauth');
+      bar.hidden = false;
+      bar.onclick = async () => {
+        bar.disabled = true;
+        try { await this.signIn(''); bar.hidden = true; this.waiting = null; resolve(); }
+        catch (e) { bar.querySelector('small').textContent = e.message; }
+        bar.disabled = false;
+      };
+    });
+    return this.waiting;
+  },
   signIn(prompt) {
     return new Promise((resolve, reject) => {
       if (!window.google?.accounts?.oauth2) return reject(new Error('Google sign-in did not load. Check your connection.'));
@@ -51,16 +72,18 @@ const DriveSource = {
       });
       this.client.callback = r => {
         if (r.error) return reject(new Error(r.error_description || r.error));
-        this.token = r.access_token; this.expires = Date.now() + (r.expires_in - 60) * 1000; resolve();
+        this.token = r.access_token; this.expires = Date.now() + (r.expires_in - 60) * 1000;
+        try { localStorage.setItem('listen-gtoken', JSON.stringify({ token: this.token, expires: this.expires })); localStorage.setItem('listen-signed-in', '1'); } catch {}
+        resolve();
       };
       this.client.error_callback = e => reject(new Error(e.message || e.type || 'Sign-in was cancelled.'));
       this.client.requestAccessToken({ prompt });
     });
   },
   async api(url, asBlob) {
-    if (Date.now() > this.expires) await this.signIn('');
+    await this.ensureToken();
     let r = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } });
-    if (r.status === 401) { await this.signIn(''); r = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } }); }
+    if (r.status === 401) { this.expires = 0; await this.ensureToken(); r = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } }); }
     if (!r.ok) throw new Error(`Google Drive error ${r.status}`);
     return asBlob ? r.blob() : r.json();
   },
@@ -68,7 +91,7 @@ const DriveSource = {
     const out = [];
     let page = '';
     do {
-      const d = await this.api(`https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id,name,size,mimeType,modifiedTime)&q=${enc(q)}${page ? '&pageToken=' + page : ''}`);
+      const d = await this.api(`https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id,name,size,mimeType,modifiedTime,createdTime)&q=${enc(q)}${page ? '&pageToken=' + page : ''}`);
       out.push(...d.files); page = d.nextPageToken;
     } while (page);
     return out;
@@ -104,7 +127,7 @@ const DriveSource = {
       }).sort((a, b) => a.n - b.n);                   // by number: 100 comes after 99, not after 10
       if (!by['book.json']) return null;              // not a book folder (e.g. voice samples)
       return { id: s.name, title: meta.title || s.name, author: meta.author || '', voice: meta.voice || '', speed: meta.speed,
-               total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by,
+               added: Date.parse(s.createdTime) || 0, total: meta.total || chapters.length, cover: !!by['cover.jpg'], epub: !!by['book.epub'], chapters, _files: by,
                text: by['text.json'] ? meta.text || [] : [] };
     }));
     return books.filter(Boolean).sort((a, b) => a.title.localeCompare(b.title));
@@ -285,7 +308,7 @@ let busyCount = 0;
 function busy(d) { busyCount = Math.max(0, busyCount + d); $('busy').hidden = !busyCount; }
 
 async function route() {
-  if (Source === DriveSource && !DriveSource.token) return show('signin');
+  if (Source === DriveSource && !DriveSource.token && !DriveSource.known) return show('signin');   // first time only
   const hash = location.hash;
   const [, view, id, n] = hash.split('/').map(decodeURIComponent);
   if (!books.length) try { books = JSON.parse(localStorage.getItem(BOOKS_KEY()) || '[]'); } catch {}
@@ -293,7 +316,7 @@ async function route() {
     show('loading');
     try { await loadBooks(); } catch (e) { console.error(e); }
     if (location.hash !== hash) return;
-  } else if (!view || view === 'book' || view === 'stats') {
+  } else if (!view || view === 'book' || view === 'stats' || view === 'notebook') {
     loadBooks().then(changed => { if (changed && location.hash === hash) render(view, id, n); }).catch(e => console.error(e));
   }
   render(view, id, n);
@@ -306,18 +329,51 @@ function render(view, id, n) {
   if (view === 'play') return showPlayer(findBook(id), +n);
   if (view === 'read') return openReader(findBook(id));
   if (view === 'stats') return Hooks.showStats();
+  if (view === 'notebook') return Hooks.showNotebook();
   showLibrary();
 }
 addEventListener('hashchange', route);
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g) location.hash = g.dataset.go; });
 $('refreshBtn').onclick = async () => { try { await loadBooks(); } catch (e) { console.error(e); } showLibrary(); };
 
+/* ---------------- library: sort and filter */
+const LIB_FILTERS = { all: 'All books', audio: 'Audiobooks', speed: 'Speed reading', done: 'Completed' };
+const libPrefs = () => ({ sort: 'recent', filter: 'all', ...(Store.data.lib || {}) });
+const lastOpened = b => Math.max(Store.pos(b.id)?.at || 0, Store.data.cfi?.[b.id]?.at || 0);
+const readPct = b => Store.data.cfi?.[b.id]?.pct || 0;
+const isDone = b => Math.max(bookProgress(b), readPct(b)) >= 0.985;      // finished listening, speed reading or reading
+/* When you finished each book (kept even if you start it again), for the stats page. */
+function noteFinished(b) {
+  if (!b || Store.data.finished?.[b.id] || !isDone(b)) return;
+  (Store.data.finished ||= {})[b.id] = Date.now(); Store.save();
+}
+function libraryBooks({ sort, filter }) {
+  const keep = { all: () => true, audio: hasAudio, speed: textOnly, done: isDone }[filter] || (() => true);
+  const byTitle = (a, b) => a.title.localeCompare(b.title);
+  const order = {
+    recent: (a, b) => lastOpened(b) - lastOpened(a) || byTitle(a, b),   // books you've never opened go last, A–Z
+    added: (a, b) => (b.added || 0) - (a.added || 0) || byTitle(a, b),
+    title: byTitle,
+  }[sort] || byTitle;
+  return books.filter(keep).sort(order);
+}
+function setLib(k, v) { Store.data.lib = { ...libPrefs(), [k]: v }; Store.save(); showLibrary(); }
+$('libSort').onchange = () => setLib('sort', $('libSort').value);
+$('libFilter').onclick = e => { const b = e.target.closest('[data-f]'); if (b) setLib('filter', b.dataset.f); };
+
 /* ---------------- library */
 function showLibrary() {
   show('library');
+  Hooks.libraryShown();
   const shelf = $('shelf');
   shelf.innerHTML = '';
   $('empty').hidden = books.length > 0;
+  const lib = libPrefs();
+  $('libSort').value = lib.sort;
+  for (const c of $('libFilter').children) c.classList.toggle('on', c.dataset.f === lib.filter);
+  const shown = libraryBooks(lib);
+  $('allTitle').textContent = `${LIB_FILTERS[lib.filter]} · ${shown.length}`;
+  if (!shown.length && books.length) shelf.innerHTML = `<p class="muted shelf-empty">${lib.filter === 'done' ? 'No finished books yet.' : 'No books here yet.'}</p>`;
   const last = findBook(Store.data.last);
   $('hero').hidden = !last;
   if (last) {
@@ -331,15 +387,15 @@ function showLibrary() {
     cover(hero.firstChild, last);
     hero.onclick = () => location.hash = ch ? `#/play/${enc(last.id)}/${ch.n}` : `#/read/${enc(last.id)}`;
   }
-  for (const b of books) {
+  for (const b of shown) {
     const card = document.createElement('button');
     card.className = 'book-card';
     const rec = hasAudio(b) ? (b.chapters.length < b.total ? `<span class="pill on">${ic('headphones')} ${b.chapters.length}/${b.total}</span>` : `<span class="pill on">${ic('headphones')} Audio</span>`)
       : textOnly(b) ? '<span class="pill on">Speed read</span>' : '';
-    card.innerHTML = `<div class="cover"></div><span class="t">${esc(b.title)}</span><span class="a">${esc(b.author)}</span>
-      <div class="tags">${rec}${b.epub ? `<span class="pill">${ic('book')} EPUB</span>` : ''}</div>
-      ${bookProgress(b) ? `<div class="bar"><i style="width:${(bookProgress(b) * 100).toFixed(1)}%"></i></div>` : ''}`;
-    cover(card.firstChild, b);
+    card.innerHTML = `<div class="cover-wrap"><div class="cover"></div>${isDone(b) ? `<span class="done-badge" title="Completed" aria-label="Completed">${ic('check')}</span>` : ''}</div>
+      <span class="t">${esc(b.title)}</span><span class="a">${esc(b.author)}</span>
+      <div class="tags">${rec}${b.epub ? `<span class="pill">${ic('book')} EPUB</span>` : ''}</div>`;
+    cover(card.firstChild.firstChild, b);
     card.onclick = () => location.hash = `#/book/${enc(b.id)}`;
     shelf.appendChild(card);
   }
@@ -486,6 +542,7 @@ function renderText(data, loading, startAt) {
   if (startAt != null && words.length) cur = Math.min(words.length - 1, Math.max(0, Math.round(startAt)));
   else if (words.length && pendingStart) cur = Math.max(0, wordAt(pendingStart + 0.02));
   applyMode();
+  Hooks.textRendered();                                // your highlights and notes in this chapter
 }
 
 function wordAt(t) {
@@ -812,9 +869,10 @@ audio.ontimeupdate = () => { if (!raf || document.hidden) tick(false); if (Date.
 function savePos() {
   if (!book || !chapter) return;
   lastSave = Date.now();
-  if (textOnly(book)) return Store.setPos(book.id, chapter.n, Math.max(cur, 0));
+  if (textOnly(book)) { Store.setPos(book.id, chapter.n, Math.max(cur, 0)); return noteFinished(book); }
   if (!audio.src) return;
   Store.setPos(book.id, chapter.n, silent() && cur >= 0 && chapter.timed ? words[cur].s : audio.currentTime);
+  noteFinished(book);
 }
 audio.onended = () => { const nx = sibling(1); if (nx) { autoNext = true; openChapter(nx); } };
 function sibling(d) { const l = chaptersOf(book); return l[l.indexOf(chapter) + d]; }
@@ -834,6 +892,7 @@ $('seek').onchange = () => { seeking = false; silent() ? goToWord(Math.round(+$(
 $('textView').onclick = e => {
   const w = e.target.closest('.w');
   if (!w || String(getSelection()).trim()) return;      // selecting text, not tapping a word
+  if (w.classList.contains('ph') && Hooks.tapMark(w)) return;   // a highlight: its menu (play from here is in it)
   PG.manual = 0;                                       // tapped a word on this page: follow from here
   if (silent()) { goToWord(+w.dataset.i); if (!SR.playing) startSilent(); return; }
   audio.currentTime = words[+w.dataset.i].s;
@@ -986,7 +1045,7 @@ const THEMES = { light: ['#fbfaf7', '#1d1b18'], sepia: ['#f4ecd8', '#5b4636'], g
 function readerCss() {
   const s = rset(), [bg, fg] = THEMES[s.theme] || THEMES.light;
   const font = s.font ? `font-family: "${s.font}", Georgia, serif !important;` : '';
-  return `html, body { background: ${bg} !important; color: ${fg} !important; }
+  return `html, body { background: ${bg} !important; color: ${fg} !important; touch-action: manipulation; }
     body { font-size: ${s.size}% !important; }
     p, li, div, span, blockquote, dd { ${font} line-height: ${s.leading} !important; ${s.align ? `text-align: ${s.align} !important;` : ''} color: inherit !important; }
     h1, h2, h3, h4, h5, h6 { ${font} color: inherit !important; }
@@ -1107,7 +1166,9 @@ function tocLabel(href) {
 }
 function onRelocated(loc) {
   if (!loc?.start || !R.rendition) return;
-  (Store.data.cfi ||= {})[R.id] = { cfi: loc.start.cfi, at: Date.now() }; Store.save();
+  let pct = null; try { if (R.locReady) pct = R.epub.locations.percentageFromCfi(loc.start.cfi); } catch {}
+  (Store.data.cfi ||= {})[R.id] = { cfi: loc.start.cfi, at: Date.now(), pct: pct ?? Store.data.cfi?.[R.id]?.pct ?? 0 }; Store.save();
+  noteFinished(R.book);
   Hooks.relocated(loc);
   $('rChapter').textContent = tocLabel(loc.start.href);
   if (R.locReady) {
@@ -1256,7 +1317,7 @@ $('fsBtn').onclick = async () => {
 
 /* ================================================================ keyboard for the player */
 document.addEventListener('keydown', e => {
-  if ($('player').hidden || e.target.matches('input, button, select')) return;
+  if ($('player').hidden || e.target.matches('input, button, select, textarea')) return;
   if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
   else if (e.key === 'ArrowLeft') $('back15').click();
   else if (e.key === 'ArrowRight') $('fwd15').click();
@@ -1274,10 +1335,12 @@ setRate(rate());
     s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
     document.head.appendChild(s);
     if (!CFG.GOOGLE_CLIENT_ID) $('signinMsg').textContent = 'Google sign-in is not set up yet (no client ID in config.js).';
+    if (DriveSource.restore() || DriveSource.known)       // signed in before: straight to your library (sync starts once features.js is in)
+      document.readyState === 'loading' ? addEventListener('DOMContentLoaded', () => Hooks.signedIn()) : Hooks.signedIn();
     $('signinBtn').onclick = async () => {
       $('signinMsg').textContent = '';
       try {
-        await DriveSource.signIn('select_account');
+        await DriveSource.signIn(DriveSource.known ? '' : 'select_account');
         Hooks.signedIn();
         route();                                       // shows last time's library at once, or the loading screen
       } catch (e) { $('signinMsg').textContent = e.message; }

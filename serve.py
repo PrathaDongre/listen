@@ -60,7 +60,8 @@ def library():
         books.append({"id": folder, "title": meta.get("title", folder), "author": meta.get("author", ""),
                       "voice": meta.get("voice", ""), "total": meta.get("total", len(chapters)),
                       "cover": os.path.exists(os.path.join(d, "cover.jpg")), "epub": has_epub,
-                      "speed": meta.get("speed"), "text": meta.get("text", []), "chapters": chapters})
+                      "speed": meta.get("speed"), "text": meta.get("text", []), "chapters": chapters,
+                      "added": int(getattr(os.stat(d), "st_birthtime", os.stat(d).st_ctime) * 1000)})
     return books
 
 

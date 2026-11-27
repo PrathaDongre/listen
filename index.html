@@ -35,6 +35,9 @@
   <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/></symbol>
   <symbol id="i-cols1" viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="16" rx="1.5"/><path d="M9 8.5h6M9 12h6M9 15.5h4"/></symbol>
   <symbol id="i-cols2" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5"/><path d="M12 4.5v15M5.5 8.5h3.5M5.5 12h3.5M15 8.5h3.5M15 12h3.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4.5h14v11l-4.5 4.5H5z"/><path d="M14.5 20v-4.5H19M8.5 9h7M8.5 12.5h4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-out" viewBox="0 0 24 24"><path d="M8 16 16 8M9.5 8H16v6.5"/></symbol>
 </svg>
 
@@ -51,6 +54,7 @@
 
 <!-- Library -->
 <div id="busy" class="busy" hidden aria-label="Loading"></div>
+<button id="reauth" class="reauth" hidden>Tap to reconnect to Google Drive<small>Google signs web apps out after an hour</small></button>
 <section id="loading" class="view loading-view" hidden>
   <div class="spinner" aria-hidden="true"></div>
   <p class="muted">Loading your library…</p>
@@ -63,7 +67,20 @@
     <button class="icon" id="refreshBtn" aria-label="Refresh library" title="Refresh"><svg class="ic" aria-hidden="true"><use href="#i-cw"/></svg></button>
   </header>
   <div id="hero" class="hero" hidden></div>
-  <h2 class="section-title" id="allTitle">All books</h2>
+  <button id="nbCard" class="nb-card" data-go="#/notebook"><span class="nb-mini" id="nbMini"></span><span class="info"><span class="label">Notebook</span><span class="t">My clippings</span><span class="c" id="nbCount"></span></span><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
+  <div class="lib-bar">
+    <h2 class="section-title" id="allTitle">All books</h2>
+    <label class="lib-sort"><span class="sr-only">Sort books</span>
+      <select id="libSort">
+        <option value="recent">Recently listened</option>
+        <option value="added">Recently added</option>
+        <option value="title">Title A–Z</option>
+      </select>
+    </label>
+  </div>
+  <div class="chips" id="libFilter" role="group" aria-label="Show">
+    <button data-f="all">All</button><button data-f="audio">Audiobooks</button><button data-f="speed">Speed reading</button><button data-f="done">Completed</button>
+  </div>
   <div id="shelf" class="shelf"></div>
   <p id="empty" class="muted pad" hidden>No books yet. Books in your Audiobooks folder appear here.</p>
 </section>
@@ -103,6 +120,8 @@
       <span id="pBook" class="kicker"></span>
       <span id="pChapter" class="chapter-name"></span>
     </div>
+    <button class="icon" id="pSearchBtn" aria-label="Search this book" title="Search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></button>
+    <button class="icon" id="pMarksBtn" aria-label="Highlights and notes" title="Highlights and notes"><svg class="ic" aria-hidden="true"><use href="#i-list"/></svg></button>
     <button class="icon" id="toReader" aria-label="Read the book" title="Read the book"><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg></button>
   </header>
 
@@ -167,6 +186,30 @@
     </div>
     <button id="stat" class="stat" title="Tap for another stat"></button>
   </footer>
+
+  <!-- Search and highlights -->
+  <div id="pSheet" class="sheet p-sheet" hidden>
+    <div class="sheet-head">
+      <div class="tabs" id="pTabs"><button data-tab="search" class="on">Search</button><button data-tab="marks">Highlights &amp; notes</button></div>
+      <button class="icon" data-close="pSheet" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="pSearchPane" class="search-pane">
+      <input id="pSearch" class="search-box" type="search" placeholder="Search this book" autocomplete="off" enterkeyhint="search">
+      <p id="pSearchStatus" class="muted small search-status"></p>
+      <ol id="pResults" class="toc results"></ol>
+    </div>
+    <ol id="pMarkList" class="toc marks" hidden></ol>
+  </div>
+</section>
+
+<!-- Notebook: every highlight and note, from every book -->
+<section id="notebook" class="view" hidden>
+  <header class="top">
+    <button class="icon" data-go="#/" aria-label="Back to library"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+    <div class="top-titles"><span class="chapter-name">Notebook</span></div>
+    <span style="width:40px"></span>
+  </header>
+  <div id="nbBody" class="nb-body"></div>
 </section>
 
 <!-- Reading stats -->
@@ -202,11 +245,16 @@
     <!-- Contents -->
     <div id="rToc" class="sheet" hidden>
       <div class="sheet-head">
-        <div class="tabs" id="rTabs"><button data-tab="toc" class="on">Contents</button><button data-tab="bookmarks">Bookmarks</button><button data-tab="highlights">Highlights</button></div>
+        <div class="tabs" id="rTabs"><button data-tab="toc" class="on">Contents</button><button data-tab="bookmarks">Bookmarks</button><button data-tab="highlights">Highlights</button><button data-tab="search">Search</button></div>
         <button class="icon" data-close="rToc" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
       <ol id="rTocList" class="toc"></ol>
       <ol id="rMarkList" class="toc marks" hidden></ol>
+      <div id="rSearchPane" class="search-pane" hidden>
+        <input id="rSearch" class="search-box" type="search" placeholder="Search this book" autocomplete="off" enterkeyhint="search">
+        <p id="rSearchStatus" class="muted small search-status"></p>
+        <ol id="rResults" class="toc results"></ol>
+      </div>
     </div>
 
     <!-- Display settings -->
